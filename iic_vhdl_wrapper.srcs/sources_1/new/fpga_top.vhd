@@ -64,6 +64,7 @@ architecture rtl of fpga_top is
     signal data_to_gpio         : std_logic_vector (3 downto 0);
     
     signal write_to_iic     : std_logic;
+    signal read_from_iic    : std_logic;
     signal write_to_gpio    : std_logic;
     signal read_from_gpio   : std_logic;
     
@@ -100,7 +101,7 @@ begin
             sda_io          => iic_sda_io,
             data_i          => data_to_iic,
             write_iic_i     => write_to_iic,
-            read_iic_i      => '0'
+            read_iic_i      => read_from_iic
         );
         
     gpio_interface_inst : entity work.gpio_interface
@@ -142,12 +143,15 @@ begin
     process (clk, reset) begin
         if (reset = '1') then
             write_to_iic    <= '0';
+            read_from_iic   <= '0';
             write_to_gpio   <= '0';
             read_from_gpio  <= '0';
             
         elsif (rising_edge(clk)) then
             
+            -- Create single clock pulses 
             write_to_iic    <= '0';
+            read_from_iic   <= '0';
             write_to_gpio   <= '0';
             read_from_gpio  <= '0';
             
@@ -158,11 +162,16 @@ begin
             
             -- Send data into GPIO controller 
             if (button_1_pipe = C_STATE_RISING) then
-                write_to_gpio <= '1';
+                read_from_iic <= '1';
             end if ;
             
             -- Read data from GPIO controller 
             if (button_2_pipe = C_STATE_RISING) then
+                read_from_gpio <= '1';
+            end if ;
+            
+            -- Read data from GPIO controller 
+            if (button_3_pipe = C_STATE_RISING) then
                 read_from_gpio <= '1';
             end if ;
             
