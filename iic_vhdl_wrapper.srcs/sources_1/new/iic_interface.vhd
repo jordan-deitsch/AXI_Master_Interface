@@ -158,6 +158,46 @@ begin
             IO => sda_io
         );
     
+    iic_ila_inst : entity work.ila_1
+        port map(
+            clk     => clk_i,
+            
+            probe0  => m2s_axi_awaddr,
+            probe1  => m2s_axi_wdata,
+            probe2  => m2s_axi_wstrb,
+            probe3  => s2m_axi_bresp,
+            
+            probe4  => m2s_axi_araddr,
+            probe5  => s2m_axi_rdata,
+            probe6  => s2m_axi_rresp,
+
+            probe7  => std_logic_vector'(0 => m2s_axi_awvalid),
+            probe8  => std_logic_vector'(0 => s2m_axi_awready),
+            probe9  => std_logic_vector'(0 => m2s_axi_wvalid),
+            probe10 => std_logic_vector'(0 => s2m_axi_wready),
+            probe11 => std_logic_vector'(0 => s2m_axi_bvalid),
+            probe12 => std_logic_vector'(0 => m2s_axi_bready),
+            
+            probe13 => std_logic_vector'(0 => m2s_axi_arvalid),
+            probe14 => std_logic_vector'(0 => s2m_axi_arready),
+            probe15 => std_logic_vector'(0 => s2m_axi_rvalid),
+            probe16 => std_logic_vector'(0 => m2s_axi_rready),
+            
+            probe17 => data_i,
+            probe18 => data_i,
+            probe19 => data_i,
+            probe20 => std_logic_vector(write_state),
+            probe21 => std_logic_vector(read_state),
+            probe22 => std_logic_vector'(0 => write_iic_i),
+            probe23 => std_logic_vector'(0 => read_iic_i),
+            probe24 => std_logic_vector'(0 => write_axi_start),
+            probe25 => std_logic_vector'(0 => read_axi_start),
+            probe26 => std_logic_vector'(0 => iic_int),
+            probe27 => std_logic_vector'(0 => axi_write_busy),
+            probe28 => std_logic_vector'(0 => axi_read_busy),
+            probe29 => std_logic_vector'(0 => axi_busy)
+        );
+    
     axi_iic_inst : entity work.iic_0
         port map(
             s_axi_aclk      => clk_i,
