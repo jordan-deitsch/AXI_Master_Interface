@@ -210,7 +210,7 @@ begin
             
             -- Read data channel
             s_axi_rdata   => s2m_axi_rdata,
-            s_axi_rresp   => m2s_axi_rresp,
+            s_axi_rresp   => s2m_axi_rresp,
             s_axi_rvalid  => s2m_axi_rvalid,
             s_axi_rready  => m2s_axi_rready,
             
@@ -256,13 +256,13 @@ begin
             
             if (write_iic_i = '1' and axi_write_busy <= '0') then
                 write_axi_start <= '1'; -- Pulse to start 
-                write_addr_buf <= std_logic_vector(C_IIC_1_ADDR);
+                write_addr_buf <= std_logic_vector(C_IIC_REG_GIE);
                 write_data_buf <= (write_data_buf'length - data_i'length - 1 downto 0 => '0') & data_i;
             end if ;
             
             if (read_iic_i = '1' and axi_read_busy <= '0') then
                 read_axi_start <= '1'; -- Pulse to start 
-                read_addr_buf <= std_logic_vector(C_IIC_2_ADDR);
+                read_addr_buf <= std_logic_vector(C_IIC_REG_GIE);
             end if ;
         
         end if ;

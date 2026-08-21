@@ -169,7 +169,6 @@ begin
         port map(
             s_axi_aclk      => clk_i,
             s_axi_aresetn   => not (reset_i),
-            -- s_axi_aresetn   => '1',
             
             -- Read address channel
             s_axi_araddr  => m2s_axi_araddr,
