@@ -167,7 +167,7 @@ begin
             
             -- Read data from GPIO controller 
             if (button_2_pipe = C_STATE_RISING) then
-                read_from_gpio <= '1';
+                write_to_gpio <= '1';
             end if ;
             
             -- Read data from GPIO controller 

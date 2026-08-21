@@ -262,7 +262,7 @@ begin
             
             if (read_iic_i = '1' and axi_read_busy <= '0') then
                 read_axi_start <= '1'; -- Pulse to start 
-                read_addr_buf <= std_logic_vector(C_IIC_REG_GIE);
+                read_addr_buf <= std_logic_vector(C_IIC_REG_ISR);
             end if ;
         
         end if ;
