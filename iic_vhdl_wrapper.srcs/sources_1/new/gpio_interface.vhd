@@ -206,7 +206,7 @@ begin
             ip2intc_irpt => gpio_int 
         );
     
-    -- State machine to initiate AXI-GPIO transactoin
+    -- State machine to initiate AXI-GPIO transaction
     process (clk_i, reset_i) begin
         if (reset_i = '1') then
             write_addr_buf <= (others => '0');
@@ -252,6 +252,7 @@ begin
         
             write_timeout_counter <= write_timeout_counter + 1;
             
+            -- Reset state machine if timeout occurs
             if (write_timeout_counter > C_TIMEOUT_VALUE) then
                 write_timeout_counter <= (others => '0');
                 write_state <= C_W_STATE_RESET;
@@ -345,6 +346,7 @@ begin
         
             read_timeout_counter <= read_timeout_counter + 1;
             
+            -- Reset state machine if timeout occurs
             if (read_timeout_counter > C_TIMEOUT_VALUE) then
                 read_timeout_counter <= (others => '0');
                 read_state <= C_R_STATE_RESET;

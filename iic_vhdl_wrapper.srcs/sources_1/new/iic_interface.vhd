@@ -89,23 +89,25 @@ architecture rtl of iic_interface is
     signal read_resp_buf    : std_logic_vector (1 downto 0) := (others => '0');
     signal read_axi_start   : std_logic := '0';
     
-    constant C_W_STATE_RESET                : unsigned (3 downto 0) := to_unsigned(16#0#, 4);
-    constant C_W_STATE_IDLE                 : unsigned (3 downto 0) := to_unsigned(16#1#, 4);
-    constant C_W_STATE_WRITE_DATA           : unsigned (3 downto 0) := to_unsigned(16#2#, 4);
-    constant C_W_STATE_WRITE_RESPONSE       : unsigned (3 downto 0) := to_unsigned(16#3#, 4);
-    constant C_W_STATE_TRANSACTION_COMPLETE : unsigned (3 downto 0) := to_unsigned(16#4#, 4);
+    constant C_W_STATE_RESET                : std_logic_vector(3 downto 0) := std_logic_vector(to_unsigned(16#0#, 4));
+    constant C_W_STATE_IDLE                 : std_logic_vector(3 downto 0) := std_logic_vector(to_unsigned(16#1#, 4));
+    constant C_W_STATE_WRITE_DATA           : std_logic_vector(3 downto 0) := std_logic_vector(to_unsigned(16#2#, 4));
+    constant C_W_STATE_WRITE_RESPONSE       : std_logic_vector(3 downto 0) := std_logic_vector(to_unsigned(16#3#, 4));
+    constant C_W_STATE_TRANSACTION_COMPLETE : std_logic_vector(3 downto 0) := std_logic_vector(to_unsigned(16#4#, 4));
     
-    constant C_R_STATE_RESET                :  unsigned (3 downto 0) := to_unsigned(16#0#, 4);
-    constant C_R_STATE_IDLE                 :  unsigned (3 downto 0) := to_unsigned(16#1#, 4);
-    constant C_R_STATE_READ_ADDRESS         :  unsigned (3 downto 0) := to_unsigned(16#2#, 4);
-    constant C_R_STATE_READ_DATA            :  unsigned (3 downto 0) := to_unsigned(16#3#, 4);
-    constant C_R_STATE_TRANSACTION_COMPLETE :  unsigned (3 downto 0) := to_unsigned(16#4#, 4);
+    constant C_R_STATE_RESET                :  std_logic_vector(3 downto 0) := std_logic_vector(to_unsigned(16#0#, 4));
+    constant C_R_STATE_IDLE                 :  std_logic_vector(3 downto 0) := std_logic_vector(to_unsigned(16#1#, 4));
+    constant C_R_STATE_READ_ADDRESS         :  std_logic_vector(3 downto 0) := std_logic_vector(to_unsigned(16#2#, 4));
+    constant C_R_STATE_READ_DATA            :  std_logic_vector(3 downto 0) := std_logic_vector(to_unsigned(16#3#, 4));
+    constant C_R_STATE_TRANSACTION_COMPLETE :  std_logic_vector(3 downto 0) := std_logic_vector(to_unsigned(16#4#, 4));
     
-    signal write_state  : unsigned (3 downto 0) := C_W_STATE_IDLE;
-    signal read_state   : unsigned (3 downto 0) := C_R_STATE_IDLE;
+    signal write_state  : std_logic_vector (3 downto 0);
+    signal read_state   : std_logic_vector (3 downto 0);
     
     signal axi_write_busy   : std_logic;
     signal axi_read_busy    : std_logic;
+    signal axi_write_done   : std_logic;
+    signal axi_read_done    : std_logic;
     signal axi_busy         : std_logic;
     
     signal write_timeout_counter    : unsigned (31 downto 0);
@@ -124,21 +126,39 @@ architecture rtl of iic_interface is
     
     signal iic_int : std_logic;
     
+    -- IIC State Machine signals
+    constant C_IIC_STATE_RESET              : std_logic_vector(3 downto 0) := X"0";
+    constant C_IIC_STATE_IDLE               : std_logic_vector(3 downto 0) := X"1";
+    constant C_IIC_STATE_WRITE_ADDRESS      : std_logic_vector(3 downto 0) := X"2";
+    constant C_IIC_STATE_WRITE_TX_DATA      : std_logic_vector(3 downto 0) := X"3";
+    constant C_IIC_STATE_WRITE_CR_START     : std_logic_vector(3 downto 0) := X"4";
+    constant C_IIC_STATE_WAIT_FOR_TX_EMPTY  : std_logic_vector(3 downto 0) := X"5";
+    constant C_IIC_STATE_WRITE_CR_STOP      : std_logic_vector(3 downto 0) := X"6";
+    
     -- IIC Register Offsets
-    constant C_IIC_REG_GIE          : unsigned(8 downto 0) := to_unsigned(16#01C#, 9);
-    constant C_IIC_REG_ISR          : unsigned(8 downto 0) := to_unsigned(16#020#, 9);
-    constant C_IIC_REG_IER          : unsigned(8 downto 0) := to_unsigned(16#028#, 9);
-    constant C_IIC_REG_SOFTR        : unsigned(8 downto 0) := to_unsigned(16#040#, 9);
-    constant C_IIC_REG_CR           : unsigned(8 downto 0) := to_unsigned(16#100#, 9);
-    constant C_IIC_REG_SR           : unsigned(8 downto 0) := to_unsigned(16#104#, 9);
-    constant C_IIC_REG_TX_FIFO      : unsigned(8 downto 0) := to_unsigned(16#108#, 9);
-    constant C_IIC_REG_RX_FIFO      : unsigned(8 downto 0) := to_unsigned(16#10C#, 9);
-    constant C_IIC_REG_ADR          : unsigned(8 downto 0) := to_unsigned(16#110#, 9);
-    constant C_IIC_REG_TX_FIFO_OCY  : unsigned(8 downto 0) := to_unsigned(16#114#, 9);
-    constant C_IIC_REG_RX_FIFO_OCY  : unsigned(8 downto 0) := to_unsigned(16#118#, 9);
-    constant C_IIC_REG_TEN_ADR      : unsigned(8 downto 0) := to_unsigned(16#11C#, 9);
-    constant C_IIC_REG_RX_FIFO_PIRQ : unsigned(8 downto 0) := to_unsigned(16#120#, 9);
-    constant C_IIC_REG_GPO          : unsigned(8 downto 0) := to_unsigned(16#124#, 9);
+    constant C_IIC_REG_GIE          : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#01C#, 9));
+    constant C_IIC_REG_ISR          : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#020#, 9));
+    constant C_IIC_REG_IER          : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#028#, 9));
+    constant C_IIC_REG_SOFTR        : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#040#, 9));
+    constant C_IIC_REG_CR           : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#100#, 9));
+    constant C_IIC_REG_SR           : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#104#, 9));
+    constant C_IIC_REG_TX_FIFO      : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#108#, 9));
+    constant C_IIC_REG_RX_FIFO      : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#10C#, 9));
+    constant C_IIC_REG_ADR          : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#110#, 9));
+    constant C_IIC_REG_TX_FIFO_OCY  : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#114#, 9));
+    constant C_IIC_REG_RX_FIFO_OCY  : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#118#, 9));
+    constant C_IIC_REG_TEN_ADR      : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#11C#, 9));
+    constant C_IIC_REG_RX_FIFO_PIRQ : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#120#, 9));
+    constant C_IIC_REG_GPO          : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#124#, 9));
+    
+    -- IIC Register Defaults
+    constant C_IIC_REG_GIE_INTERRUPT_ENABLE : std_logic_vector(31 downto 0) := X"8000_0000";
+    
+    constant C_IIC_GPIO_7_BIT_ADDR  : std_logic_vector(6 downto 0) := std_logic_vector(to_unsigned(16#3E#, 7));   -- 7-bit address of SX1509
+    
+    signal probe_write_addr : std_logic_vector (8 downto 0);
+    signal probe_read_addr  : std_logic_vector (8 downto 0);
+    signal probe_write_data : std_logic_vector (31 downto 0);
 
 begin
 
@@ -183,11 +203,11 @@ begin
             probe15 => std_logic_vector'(0 => s2m_axi_rvalid),
             probe16 => std_logic_vector'(0 => m2s_axi_rready),
             
-            probe17 => data_i,
-            probe18 => data_i,
-            probe19 => data_i,
-            probe20 => std_logic_vector(write_state),
-            probe21 => std_logic_vector(read_state),
+            probe17 => std_logic_vector(write_state),
+            probe18 => std_logic_vector(read_state),
+            probe19 => probe_write_data,
+            probe20 => data_i,
+            probe21 => std_logic_vector'(0 => axi_busy),
             probe22 => std_logic_vector'(0 => write_iic_i),
             probe23 => std_logic_vector'(0 => read_iic_i),
             probe24 => std_logic_vector'(0 => write_axi_start),
@@ -195,7 +215,17 @@ begin
             probe26 => std_logic_vector'(0 => iic_int),
             probe27 => std_logic_vector'(0 => axi_write_busy),
             probe28 => std_logic_vector'(0 => axi_read_busy),
-            probe29 => std_logic_vector'(0 => axi_busy)
+            probe29 => std_logic_vector'(0 => axi_busy),
+            probe30 => std_logic_vector'(0 => axi_write_done),
+            probe31 => std_logic_vector'(0 => axi_read_done)
+        );
+        
+    vio_inst : entity work.vio_0
+        port map(
+            clk => clk_i,
+            probe_out0 => probe_write_addr,
+            probe_out1 => probe_read_addr,
+            probe_out2 => probe_write_data
         );
     
     axi_iic_inst : entity work.iic_0
@@ -241,7 +271,7 @@ begin
             iic2intc_irpt =>  iic_int           
         );
     
-    -- State machine to initiate AXI-GPIO transactoin
+    -- State machine to initiate AXI-IIC transaction
     process (clk_i, reset_i) begin
         if (reset_i = '1') then
             write_addr_buf <= (others => '0');
@@ -255,18 +285,20 @@ begin
             read_axi_start <= '0';
             
             if (write_iic_i = '1' and axi_write_busy <= '0') then
-                write_axi_start <= '1'; -- Pulse to start 
-                write_addr_buf <= std_logic_vector(C_IIC_REG_GIE);
-                write_data_buf <= (write_data_buf'length - data_i'length - 1 downto 0 => '0') & data_i;
+                write_axi_start <= '1'; -- Pulse to start write
+                write_addr_buf <= probe_write_addr;
+                write_data_buf <= probe_write_data;
             end if ;
             
             if (read_iic_i = '1' and axi_read_busy <= '0') then
-                read_axi_start <= '1'; -- Pulse to start 
-                read_addr_buf <= std_logic_vector(C_IIC_REG_ISR);
+                read_axi_start <= '1'; -- Pulse to start read
+                read_addr_buf <= probe_read_addr;
             end if ;
-        
+            
         end if ;
     end process ;
+    
+    -- State machine to handle interrupts
 
     -- State machine for AXI register writes
     process (clk_i, reset_i) begin
@@ -280,6 +312,7 @@ begin
             write_resp_buf          <= (others => '0');
             write_timeout_counter   <= (others => '0');
             axi_write_busy          <= '0';
+            axi_write_done          <= '0';
             
             write_state <= C_W_STATE_RESET;
             
@@ -287,6 +320,7 @@ begin
         
             write_timeout_counter <= write_timeout_counter + 1;
             
+            -- Reset state machine if timeout occurs
             if (write_timeout_counter > C_TIMEOUT_VALUE) then
                 write_timeout_counter <= (others => '0');
                 write_state <= C_W_STATE_RESET;
@@ -303,6 +337,7 @@ begin
                     write_resp_buf          <= (others => '0');
                     write_timeout_counter   <= (others => '0');
                     axi_write_busy          <= '0';
+                    axi_write_done          <= '0';
                     
                     write_state <= C_W_STATE_IDLE;
                 
@@ -313,6 +348,7 @@ begin
                     m2s_axi_wvalid          <= '0';
                     m2s_axi_bready          <= '0';
                     axi_write_busy          <= '0';   
+                    axi_write_done          <= '0';
                     write_timeout_counter   <= (others => '0');             
                     
                     -- Wait for external pulse of write_axi_start to transition to C_W_STATE_WRITE_DATA
@@ -352,6 +388,9 @@ begin
                     -- Reset m2s_axi_bready back to 0
                     m2s_axi_bready <= '0';
                     
+                    -- Signal axi done for one pulse
+                    axi_write_done <= '1';
+                    
                     -- Immediately transition to C_W_STATE_IDLE
                     write_state <= C_W_STATE_IDLE;
                     
@@ -373,6 +412,7 @@ begin
             read_resp_buf           <= (others => '0');
             read_timeout_counter    <= (others => '0');
             axi_read_busy           <= '0';
+            axi_read_done           <= '0';
             
             read_state <= C_R_STATE_RESET;
             
@@ -380,6 +420,7 @@ begin
         
             read_timeout_counter <= read_timeout_counter + 1;
             
+            -- Reset state machine if timeout occurs
             if (read_timeout_counter > C_TIMEOUT_VALUE) then
                 read_timeout_counter <= (others => '0');
                 read_state <= C_R_STATE_RESET;
@@ -395,6 +436,7 @@ begin
                     read_resp_buf           <= (others => '0');
                     read_timeout_counter    <= (others => '0');
                     axi_read_busy           <= '0';
+                    axi_read_done           <= '0';
                     
                     read_state <= C_R_STATE_IDLE;
                 
@@ -404,6 +446,7 @@ begin
                     m2s_axi_arvalid         <= '0';
                     m2s_axi_rready          <= '0';
                     axi_read_busy           <= '0'; 
+                    axi_read_done           <= '0';
                     read_timeout_counter    <= (others => '0');               
                     
                     -- Wait for external pulse of read_axi_start to transition to C_R_STATE_READ_ADDRESS
@@ -438,6 +481,9 @@ begin
                     
                     -- Reset m2s_axi_rready back to 0
                     m2s_axi_rready  <= '0';
+                    
+                    -- Signal axi done for one pulse
+                    axi_read_done <= '1';
                     
                     -- Immediately transition to C_R_STATE_IDLE
                     read_state <= C_R_STATE_IDLE;   
