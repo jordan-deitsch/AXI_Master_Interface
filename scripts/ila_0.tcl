@@ -66,7 +66,7 @@ set ila_1 [create_ip -name ila -vendor xilinx.com -library ip -version 6.2 -modu
 set_property -dict [list \
   CONFIG.C_DATA_DEPTH {4096} \
   CONFIG.C_NUM_OF_PROBES {1} \
-] [get_ips ila_iic]
+] [get_ips ila_1]
 
 # Runtime Parameters
 set_property -dict { 

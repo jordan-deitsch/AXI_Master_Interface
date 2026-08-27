@@ -125,45 +125,45 @@ begin
     gpio_o      <= gpio_o_buf;
     axi_busy    <= axi_write_busy or axi_read_busy;
 
-    gpio_ila_inst : entity work.ila_0
-        port map(
-            clk     => clk_i,
+--    gpio_ila_inst : entity work.ila_0
+--        port map(
+--            clk     => clk_i,
             
-            probe0  => m2s_axi_awaddr,
-            probe1  => m2s_axi_wdata,
-            probe2  => m2s_axi_wstrb,
-            probe3  => s2m_axi_bresp,
+--            probe0  => m2s_axi_awaddr,
+--            probe1  => m2s_axi_wdata,
+--            probe2  => m2s_axi_wstrb,
+--            probe3  => s2m_axi_bresp,
             
-            probe4  => m2s_axi_araddr,
-            probe5  => s2m_axi_rdata,
-            probe6  => s2m_axi_rresp,
+--            probe4  => m2s_axi_araddr,
+--            probe5  => s2m_axi_rdata,
+--            probe6  => s2m_axi_rresp,
 
-            probe7  => std_logic_vector'(0 => m2s_axi_awvalid),
-            probe8  => std_logic_vector'(0 => s2m_axi_awready),
-            probe9  => std_logic_vector'(0 => m2s_axi_wvalid),
-            probe10 => std_logic_vector'(0 => s2m_axi_wready),
-            probe11 => std_logic_vector'(0 => s2m_axi_bvalid),
-            probe12 => std_logic_vector'(0 => m2s_axi_bready),
+--            probe7  => std_logic_vector'(0 => m2s_axi_awvalid),
+--            probe8  => std_logic_vector'(0 => s2m_axi_awready),
+--            probe9  => std_logic_vector'(0 => m2s_axi_wvalid),
+--            probe10 => std_logic_vector'(0 => s2m_axi_wready),
+--            probe11 => std_logic_vector'(0 => s2m_axi_bvalid),
+--            probe12 => std_logic_vector'(0 => m2s_axi_bready),
             
-            probe13 => std_logic_vector'(0 => m2s_axi_arvalid),
-            probe14 => std_logic_vector'(0 => s2m_axi_arready),
-            probe15 => std_logic_vector'(0 => s2m_axi_rvalid),
-            probe16 => std_logic_vector'(0 => m2s_axi_rready),
+--            probe13 => std_logic_vector'(0 => m2s_axi_arvalid),
+--            probe14 => std_logic_vector'(0 => s2m_axi_arready),
+--            probe15 => std_logic_vector'(0 => s2m_axi_rvalid),
+--            probe16 => std_logic_vector'(0 => m2s_axi_rready),
             
-            probe17 => data_i,
-            probe18 => gpio_o_buf,
-            probe19 => gpio_i,
-            probe20 => std_logic_vector(write_state),
-            probe21 => std_logic_vector(read_state),
-            probe22 => std_logic_vector'(0 => write_gpio_i),
-            probe23 => std_logic_vector'(0 => read_gpio_i),
-            probe24 => std_logic_vector'(0 => write_axi_start),
-            probe25 => std_logic_vector'(0 => read_axi_start),
-            probe26 => std_logic_vector'(0 => gpio_int),
-            probe27 => std_logic_vector'(0 => axi_write_busy),
-            probe28 => std_logic_vector'(0 => axi_read_busy),
-            probe29 => std_logic_vector'(0 => axi_busy)
-        );
+--            probe17 => data_i,
+--            probe18 => gpio_o_buf,
+--            probe19 => gpio_i,
+--            probe20 => std_logic_vector(write_state),
+--            probe21 => std_logic_vector(read_state),
+--            probe22 => std_logic_vector'(0 => write_gpio_i),
+--            probe23 => std_logic_vector'(0 => read_gpio_i),
+--            probe24 => std_logic_vector'(0 => write_axi_start),
+--            probe25 => std_logic_vector'(0 => read_axi_start),
+--            probe26 => std_logic_vector'(0 => gpio_int),
+--            probe27 => std_logic_vector'(0 => axi_write_busy),
+--            probe28 => std_logic_vector'(0 => axi_read_busy),
+--            probe29 => std_logic_vector'(0 => axi_busy)
+--        );
     
     axi_gpio_inst : entity work.gpio_0
         port map(
