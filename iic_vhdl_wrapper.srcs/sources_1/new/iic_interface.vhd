@@ -812,7 +812,12 @@ begin
                 when C_IIC_STATE_IDLE =>
                     -- Wait for external signal to start write sequence
                     if (iic_write_start = '1') then
-                        iic_write_state <= C_IIC_STATE_FLUSH_TX_FIFO;
+                        -- Check for at least 2 valid FIFO words available for transmit (IIC slave device address and 1 data word minimum)
+                        if (fifo_valid = '0' or unsigned(fifo_data_count) < 2) then
+                            iic_write_state <= C_IIC_STATE_WRITE_ERROR;
+                        else
+                            iic_write_state <= C_IIC_STATE_FLUSH_TX_FIFO;
+                        end if ;
                     end if ;
                     
                 when C_IIC_STATE_WAIT_FOR_AXI_WRITE =>
