@@ -89,18 +89,27 @@ architecture rtl of iic_interface is
     signal read_resp_buf    : std_logic_vector (1 downto 0) := (others => '0');
     signal read_axi_start   : std_logic := '0';
     
-    constant C_W_STATE_RESET                : std_logic_vector(3 downto 0) := X"0";
-    constant C_W_STATE_IDLE                 : std_logic_vector(3 downto 0) := X"1";
-    constant C_W_STATE_WRITE_DATA           : std_logic_vector(3 downto 0) := X"2";
-    constant C_W_STATE_WRITE_RESPONSE       : std_logic_vector(3 downto 0) := X"3";
+    type T_AXI_WRITE_STATE is 
+    (
+        C_W_STATE_RESET,
+        C_W_STATE_IDLE,
+        C_W_STATE_WRITE_DATA,
+        C_W_STATE_WRITE_RESPONSE
+    );
     
-    constant C_R_STATE_RESET                :  std_logic_vector(3 downto 0) := X"0";
-    constant C_R_STATE_IDLE                 :  std_logic_vector(3 downto 0) := X"1";
-    constant C_R_STATE_READ_ADDRESS         :  std_logic_vector(3 downto 0) := X"2";
-    constant C_R_STATE_READ_DATA            :  std_logic_vector(3 downto 0) := X"3";
+    type T_AXI_READ_STATE is 
+    (
+        C_R_STATE_RESET,
+        C_R_STATE_IDLE,
+        C_R_STATE_READ_ADDRESS,
+        C_R_STATE_READ_DATA
+    );
     
-    signal write_state  : std_logic_vector (3 downto 0);
-    signal read_state   : std_logic_vector (3 downto 0);
+    signal write_state  : T_AXI_WRITE_STATE;
+    signal read_state   : T_AXI_READ_STATE;
+    
+    signal write_state_ila : std_logic_vector(3 downto 0);
+    signal read_state_ila : std_logic_vector(3 downto 0);
     
     signal axi_write_busy   : std_logic;
     signal axi_read_busy    : std_logic;
@@ -140,6 +149,8 @@ architecture rtl of iic_interface is
     constant C_IIC_REG_ISR_IER_ADDR_AS_SLAVE_MASK       : std_logic_vector(31 downto 0) := X"0000_0020";
     constant C_IIC_REG_ISR_IER_NOT_ADDR_AS_SLAVE_MASK   : std_logic_vector(31 downto 0) := X"0000_0040";
     constant C_IIC_REG_ISR_IER_TX_FIFO_HALF_EMPTY_MASK  : std_logic_vector(31 downto 0) := X"0000_0080";
+    constant C_IIC_REG_ISR_IER_GENERAL_ERROR_MASK        : std_logic_vector(31 downto 0) := C_IIC_REG_ISR_IER_ARB_LOST_MASK or 
+                                                                                            C_IIC_REG_ISR_IER_TX_ERROR_MASK;
     
     constant C_IIC_REG_CR_IIC_ENABLE_MASK       : std_logic_vector(31 downto 0) := X"0000_0001";
     constant C_IIC_REG_CR_TX_FIFO_RESET_MASK    : std_logic_vector(31 downto 0) := X"0000_0002";
@@ -162,72 +173,105 @@ architecture rtl of iic_interface is
     signal iic_intr : std_logic;
     
     -- IIC Write states
-    -- IIC Write states
-    constant C_IIC_STATE_RESET                  : std_logic_vector(7 downto 0) := X"00";
-    constant C_IIC_STATE_IDLE                   : std_logic_vector(7 downto 0) := X"01";
-    constant C_IIC_STATE_WAIT_FOR_AXI_WRITE     : std_logic_vector(7 downto 0) := X"02";
-    constant C_IIC_STATE_FLUSH_TX_FIFO          : std_logic_vector(7 downto 0) := X"03";
-    constant C_IIC_STATE_NORMAL_TX_FIFO         : std_logic_vector(7 downto 0) := X"04";
-    constant C_IIC_STATE_ENABLE_TX_FIFO_INTR    : std_logic_vector(7 downto 0) := X"05";
-    constant C_IIC_STATE_WRITE_TX_FIFO          : std_logic_vector(7 downto 0) := X"06";
-    constant C_IIC_STATE_START_TX               : std_logic_vector(7 downto 0) := X"07";
-    constant C_IIC_STATE_WAIT_FOR_TX_EMPTY_INTR : std_logic_vector(7 downto 0) := X"08";
-    constant C_IIC_STATE_TOGGLE_ISR_NOT_BUSY    : std_logic_vector(7 downto 0) := X"09";
-    constant C_IIC_STATE_ENABLE_NOT_BUSY_INTR   : std_logic_vector(7 downto 0) := X"0A";
-    constant C_IIC_STATE_WAIT_FOR_INTR_CLEAR    : std_logic_vector(7 downto 0) := X"0B";
-    constant C_IIC_STATE_SETUP_CR_STOP          : std_logic_vector(7 downto 0) := X"0C";
-    constant C_IIC_STATE_WRITE_FINAL_TX_FIFO    : std_logic_vector(7 downto 0) := X"0D";
-    constant C_IIC_STATE_WAIT_FOR_NOT_BUSY_INTR : std_logic_vector(7 downto 0) := X"0E";
-    constant C_IIC_STATE_TOGGLE_ISR_TX_EMPTY    : std_logic_vector(7 downto 0) := X"0F";
-    constant C_IIC_STATE_DISABLE_ALL_INTR       : std_logic_vector(7 downto 0) := X"10";
-    constant C_IIC_STATE_TRANSACTION_COMPLETE   : std_logic_vector(7 downto 0) := X"11";
-    
-    constant C_IIC_STATE_WRITE_ERROR            : std_logic_vector(7 downto 0) := X"FF";
+    type T_IIC_WRITE_STATE is
+    (
+        C_IIC_STATE_RESET,
+        C_IIC_STATE_IDLE,
+        C_IIC_STATE_WAIT_FOR_AXI_WRITE,
+        C_IIC_STATE_FLUSH_TX_FIFO,
+        C_IIC_STATE_NORMAL_TX_FIFO,
+        C_IIC_STATE_ENABLE_TX_FIFO_INTR,
+        C_IIC_STATE_WRITE_TX_FIFO,
+        C_IIC_STATE_START_TX,
+        C_IIC_STATE_WAIT_FOR_TX_EMPTY_INTR,
+        C_IIC_STATE_TOGGLE_ISR_NOT_BUSY,
+        C_IIC_STATE_ENABLE_NOT_BUSY_INTR,
+        C_IIC_STATE_WAIT_FOR_INTR_CLEAR,
+        C_IIC_STATE_SETUP_CR_STOP,
+        C_IIC_STATE_WRITE_FINAL_TX_FIFO,
+        C_IIC_STATE_WAIT_FOR_NOT_BUSY_INTR,
+        C_IIC_STATE_TOGGLE_ISR_TX_EMPTY,
+        C_IIC_STATE_DISABLE_CONTROLLER,
+        C_IIC_STATE_DISABLE_ALL_INTR,
+        C_IIC_STATE_TRANSACTION_COMPLETE,
+        C_IIC_STATE_WRITE_ERROR
+    );
     
     -- IIC control signals
-    signal iic_write_state      : std_logic_vector(7 downto 0);
-    signal iic_write_state_next : std_logic_vector(7 downto 0);
-    signal iic_start_reset_seq  : std_logic;
-    signal iic_reset_seq_done   : std_logic;
+    signal iic_write_state      : T_IIC_WRITE_STATE;
+    signal iic_write_state_next : T_IIC_WRITE_STATE;
+    signal iic_write_state_ila  : std_logic_vector (7 downto 0);
+    signal iic_write_error_flag : std_logic;
     signal iic_fifo_rd_en       : std_logic;
+    signal iic_write_start      : std_logic;
     
-    signal iic_start_write      : std_logic;
-    signal vio_iic_start_write  : std_logic;
-    signal vio_iic_start_write_pipe : std_logic_vector (1 downto 0);
+    signal iic_axi_write_start  : std_logic;
+    signal iic_axi_read_start   : std_logic;
+    signal iic_axi_write_addr   : std_logic_vector (8 downto 0);
+    signal iic_axi_read_addr    : std_logic_vector (8 downto 0);
+    signal iic_axi_write_data   : std_logic_vector (31 downto 0);
     
+    -- IIC Reset states
+    type T_IIC_RESET_STATE is
+    (
+        C_IIC_RESET_STATE_RESET,
+        C_IIC_RESET_STATE_IDLE,
+        C_IIC_RESET_STATE_WAIT_FOR_AXI_WRITE,
+        C_IIC_RESET_STATE_FLUSH_TX_FIFO,
+        C_IIC_RESET_STATE_SOFT_RESET,
+        C_IIC_RESET_STATE_ENABLE_GLOBAL_INTR,
+        C_IIC_RESET_STATE_RESET_COMPLETE
+    );
     
-    signal iic_write_axi_start : std_logic;
-    signal iic_read_axi_start  : std_logic;
-    signal iic_write_addr      : std_logic_vector (8 downto 0);
-    signal iic_read_addr       : std_logic_vector (8 downto 0);
-    signal iic_write_data      : std_logic_vector (31 downto 0);
+    -- IIC reset control signal
+    signal iic_reset_state      : T_IIC_RESET_STATE;
+    signal iic_reset_state_next : T_IIC_RESET_STATE;
+    signal iic_reset_state_ila  : std_logic_vector (7 downto 0);
+    signal iic_reset_seq_active : std_logic;
     
-    -- VIO AXI control signals
-    signal vio_write_axi_start  : std_logic;
-    signal vio_read_axi_start   : std_logic;
-    signal vio_write_addr       : std_logic_vector (8 downto 0);
-    signal vio_read_addr        : std_logic_vector (8 downto 0);
-    signal vio_write_data       : std_logic_vector (31 downto 0);
-    
+    signal iic_reset_axi_write_start  : std_logic;
+    signal iic_reset_axi_read_start   : std_logic;
+    signal iic_reset_axi_write_addr   : std_logic_vector (8 downto 0);
+    signal iic_reset_axi_read_addr    : std_logic_vector (8 downto 0);
+    signal iic_reset_axi_write_data   : std_logic_vector (31 downto 0);
+       
     -- Interrupt handler states
-    constant C_INTR_STATE_RESET             : std_logic_vector(3 downto 0) := X"0";
-    constant C_INTR_STATE_IDLE              : std_logic_vector(3 downto 0) := X"1";
-    constant C_INTR_STATE_WAIT_FOR_AXI_READ : std_logic_vector(3 downto 0) := X"2";
-    constant C_INTR_STATE_READ_ISR          : std_logic_vector(3 downto 0) := X"3";
-    constant C_INTR_STATE_WAITING_CLEAR     : std_logic_vector(3 downto 0) := X"4";
+    type T_INTR_STATE is
+    (
+        C_INTR_STATE_RESET,
+        C_INTR_STATE_IDLE,
+        C_INTR_STATE_WAIT_FOR_AXI_READ,
+        C_INTR_STATE_READ_ISR,
+        C_INTR_STATE_WAITING_CLEAR,
+        C_INTR_STATE_ERROR
+    );
     
     -- Interrupt handler control signals
-    signal intr_write_axi_start : std_logic;
-    signal intr_read_axi_start  : std_logic;
-    signal intr_write_addr      : std_logic_vector (8 downto 0);
-    signal intr_read_addr       : std_logic_vector (8 downto 0);
-    signal intr_write_data      : std_logic_vector (31 downto 0);
+    signal intr_state           : T_INTR_STATE;
+    signal intr_state_next      : T_INTR_STATE;
+    signal intr_state_ila       : std_logic_vector (7 downto 0);
     signal iic_intr_buff        : std_logic;
-    signal intr_state           : std_logic_vector (3 downto 0);
-    signal intr_state_next      : std_logic_vector (3 downto 0);
+    signal intr_error_flag      : std_logic;
     signal intr_status_reg      : std_logic_vector (31 downto 0);
     
+    signal intr_axi_write_start : std_logic;
+    signal intr_axi_read_start  : std_logic;
+    signal intr_axi_write_addr  : std_logic_vector (8 downto 0);
+    signal intr_axi_read_addr   : std_logic_vector (8 downto 0);
+    signal intr_axi_write_data  : std_logic_vector (31 downto 0);
+    
+    -- VIO AXI control signals
+    signal vio_axi_write_start  : std_logic;
+    signal vio_axi_read_start   : std_logic;
+    signal vio_axi_write_addr   : std_logic_vector (8 downto 0);
+    signal vio_axi_read_addr    : std_logic_vector (8 downto 0);
+    signal vio_axi_write_data   : std_logic_vector (31 downto 0);
+    
+    signal vio_iic_write_start      : std_logic;
+    signal vio_iic_write_start_pipe : std_logic_vector (1 downto 0);
+    
     -- FIFO signals
+    signal fifo_reset           : std_logic;
     signal vio_fifo_input       : std_logic_vector (7 downto 0);
     signal fifo_full            : std_logic;
     signal fifo_wr_en           : std_logic;
@@ -248,6 +292,62 @@ architecture rtl of iic_interface is
     
 begin
 
+    with write_state select
+    write_state_ila <=
+        X"0" when C_W_STATE_RESET,
+        X"1" when C_W_STATE_IDLE,
+        X"2" when C_W_STATE_WRITE_DATA,
+        X"3" when C_W_STATE_WRITE_RESPONSE;
+        
+    with read_state select
+    read_state_ila <=
+        X"0" when C_R_STATE_RESET,
+        X"1" when C_R_STATE_IDLE,
+        X"2" when C_R_STATE_READ_ADDRESS,
+        X"3" when C_R_STATE_READ_DATA;
+        
+    with intr_state select
+    intr_state_ila <=
+        X"00" when C_INTR_STATE_RESET,
+        X"01" when C_INTR_STATE_IDLE,
+        X"02" when C_INTR_STATE_WAIT_FOR_AXI_READ,
+        X"03" when C_INTR_STATE_READ_ISR,
+        X"04" when C_INTR_STATE_WAITING_CLEAR,
+        X"05" when C_INTR_STATE_ERROR;
+        
+    with iic_reset_state select
+    iic_reset_state_ila <=
+        X"00" when C_IIC_RESET_STATE_RESET,
+        X"01" when C_IIC_RESET_STATE_IDLE,
+        X"02" when C_IIC_RESET_STATE_WAIT_FOR_AXI_WRITE,
+        X"03" when C_IIC_RESET_STATE_FLUSH_TX_FIFO,
+        X"04" when C_IIC_RESET_STATE_SOFT_RESET,
+        X"05" when C_IIC_RESET_STATE_ENABLE_GLOBAL_INTR,
+        X"06" when C_IIC_RESET_STATE_RESET_COMPLETE;
+        
+    with iic_write_state select
+    iic_write_state_ila <=
+        X"00" when C_IIC_STATE_RESET,
+        X"01" when C_IIC_STATE_IDLE,
+        X"02" when C_IIC_STATE_WAIT_FOR_AXI_WRITE,
+        X"03" when C_IIC_STATE_FLUSH_TX_FIFO,
+        X"04" when C_IIC_STATE_NORMAL_TX_FIFO,
+        X"05" when C_IIC_STATE_ENABLE_TX_FIFO_INTR,
+        X"06" when C_IIC_STATE_WRITE_TX_FIFO,
+        X"07" when C_IIC_STATE_START_TX,
+        X"08" when C_IIC_STATE_WAIT_FOR_TX_EMPTY_INTR,
+        X"09" when C_IIC_STATE_TOGGLE_ISR_NOT_BUSY,
+        X"0A" when C_IIC_STATE_ENABLE_NOT_BUSY_INTR,
+        X"0B" when C_IIC_STATE_WAIT_FOR_INTR_CLEAR,
+        X"0C" when C_IIC_STATE_SETUP_CR_STOP,
+        X"0D" when C_IIC_STATE_WRITE_FINAL_TX_FIFO,
+        X"0E" when C_IIC_STATE_WAIT_FOR_NOT_BUSY_INTR,
+        X"0F" when C_IIC_STATE_TOGGLE_ISR_TX_EMPTY,
+        X"10" when C_IIC_STATE_DISABLE_CONTROLLER,
+        X"11" when C_IIC_STATE_DISABLE_ALL_INTR,
+        X"12" when C_IIC_STATE_TRANSACTION_COMPLETE,
+        X"13" when C_IIC_STATE_WRITE_ERROR;
+    
     scl_iobuf : IOBUF
         port map (
             I  => scl_o,
@@ -287,8 +387,8 @@ begin
             probe15 => std_logic_vector'(0 => s2m_axi_rvalid),
             probe16 => std_logic_vector'(0 => m2s_axi_rready),
             
-            probe17 => std_logic_vector(write_state),
-            probe18 => std_logic_vector(read_state),
+            probe17 => write_state_ila,
+            probe18 => read_state_ila,
             probe19 => std_logic_vector'(0 => write_axi_start),
             probe20 => std_logic_vector'(0 => read_axi_start),
             probe21 => std_logic_vector'(0 => axi_busy),
@@ -297,7 +397,7 @@ begin
             probe24 => std_logic_vector'(0 => axi_write_done),
             probe25 => std_logic_vector'(0 => axi_read_done),
             
-            probe26 => std_logic_vector(intr_state),
+            probe26 => intr_state_ila,
             probe27 => std_logic_vector'(0 => iic_intr),
             probe28 => intr_status_reg,
 
@@ -310,20 +410,23 @@ begin
             probe35 => std_logic_vector'(0 => fifo_overflow),
             probe36 => std_logic_vector'(0 => fifo_underflow),
             
-            probe37 => std_logic_vector(iic_write_state),
-            probe38 => std_logic_vector'(0 => iic_start_write)        
+            probe37 => iic_write_state_ila,
+            probe38 => std_logic_vector'(0 => iic_write_start),
+            
+            probe39 => iic_reset_state_ila,
+            probe40 => std_logic_vector'(0 => iic_reset_seq_active)        
         );
         
     vio_inst : entity work.vio_0
         port map(
             clk             => clk_i,
-            probe_out0      => vio_write_addr,
-            probe_out1      => vio_read_addr,
-            probe_out2      => vio_write_data,
+            probe_out0      => vio_axi_write_addr,
+            probe_out1      => vio_axi_read_addr,
+            probe_out2      => vio_axi_write_data,
             probe_out3      => vio_fifo_input,
             probe_out4(0)   => vio_fifo_wr_en,
             probe_out5(0)   => vio_fifo_rd_en,
-            probe_out6(0)   => vio_iic_start_write
+            probe_out6(0)   => vio_iic_write_start
         );
     
     axi_iic_inst : entity work.iic_0
@@ -372,7 +475,7 @@ begin
     iic_data_fifo : entity work.fifo_generator_0
         port map(
             clk     => clk_i,
-            srst    => reset_i,
+            srst    => reset_i or fifo_reset,
             
             din     => vio_fifo_input,
             full    => fifo_full,
@@ -405,36 +508,45 @@ begin
             fifo_rd_en <= '0';
             
             -- Priority of AXI write start pulses
-            if (intr_write_axi_start = '1') then
+            if (iic_reset_axi_write_start = '1') then
                 write_axi_start <= '1';
-                write_addr_buf <= intr_write_addr;
-                write_data_buf <= intr_write_data;
+                write_addr_buf <= iic_reset_axi_write_addr;
+                write_data_buf <= iic_reset_axi_write_data;
+            
+            elsif (intr_axi_write_start = '1') then
+                write_axi_start <= '1';
+                write_addr_buf <= intr_axi_write_addr;
+                write_data_buf <= intr_axi_write_data;
                 
-            elsif (iic_write_axi_start = '1') then
+            elsif (iic_axi_write_start = '1') then
                 write_axi_start <= '1';
-                write_addr_buf <= iic_write_addr;
-                write_data_buf <= iic_write_data;
+                write_addr_buf <= iic_axi_write_addr;
+                write_data_buf <= iic_axi_write_data;
                 
-            elsif (vio_write_axi_start = '1') then
+            elsif (vio_axi_write_start = '1') then
                 write_axi_start <= '1';
-                write_addr_buf <= vio_write_addr;
-                write_data_buf <= vio_write_data;
+                write_addr_buf <= vio_axi_write_addr;
+                write_data_buf <= vio_axi_write_data;
                 
             -- Add new write sources here
             end if ;
             
             -- Priority of AXI read start pulses
-            if (intr_read_axi_start = '1') then
+            if (iic_reset_axi_read_start = '1') then
                 read_axi_start <= '1';
-                read_addr_buf <= intr_read_addr;
+                read_addr_buf <= iic_reset_axi_read_addr;
                 
-            elsif (iic_read_axi_start = '1') then
+            elsif (intr_axi_read_start = '1') then
                 read_axi_start <= '1';
-                read_addr_buf <= iic_read_addr;
+                read_addr_buf <= intr_axi_read_addr;
+                
+            elsif (iic_axi_read_start = '1') then
+                read_axi_start <= '1';
+                read_addr_buf <= iic_axi_read_addr;
             
-            elsif (vio_read_axi_start = '1') then
+            elsif (vio_axi_read_start = '1') then
                 read_axi_start <= '1';
-                read_addr_buf <= vio_read_addr;
+                read_addr_buf <= vio_axi_read_addr;
                 
             -- Add new read sources here
             end if ;
@@ -452,20 +564,20 @@ begin
     -- State machine to initiate AXI-IIC transaction from VIO and button
     process (clk_i, reset_i) begin
         if (reset_i = '1') then
-            vio_write_axi_start <= '0';
-            vio_read_axi_start <= '0';
+            vio_axi_write_start <= '0';
+            vio_axi_read_start <= '0';
             
             fifo_wr_en <= '0';
             vio_fifo_wr_en_pipe <= (others => '0');
             vio_fifo_rd_en_pipe <= (others => '0');
             
-            iic_start_write <= '0';
-            vio_iic_start_write_pipe <= (others => '0');
+            iic_write_start <= '0';
+            vio_iic_write_start_pipe <= (others => '0');
             
         elsif rising_edge(clk_i) then
             
-            vio_write_axi_start <= '0';
-            vio_read_axi_start <= '0';
+            vio_axi_write_start <= '0';
+            vio_axi_read_start <= '0';
             
             fifo_wr_en <= '0';
             vio_fifo_wr_en_pipe(0) <= vio_fifo_wr_en;
@@ -474,38 +586,127 @@ begin
             vio_fifo_rd_en_pipe(0) <= vio_fifo_rd_en;
             vio_fifo_rd_en_pipe(1) <= vio_fifo_rd_en_pipe(0);
             
-            iic_start_write <= '0';
-            vio_iic_start_write_pipe(0) <= vio_iic_start_write;
-            vio_iic_start_write_pipe(1) <= vio_iic_start_write_pipe(0);
+            iic_write_start <= '0';
+            vio_iic_write_start_pipe(0) <= vio_iic_write_start;
+            vio_iic_write_start_pipe(1) <= vio_iic_write_start_pipe(0);
             
             if (write_iic_i = '1' and axi_write_busy <= '0') then
-                vio_write_axi_start <= '1'; -- Pulse to start write
+                vio_axi_write_start <= '1'; -- Pulse to start write
             end if ;
             
             if (read_iic_i = '1' and axi_read_busy <= '0') then
-                vio_read_axi_start <= '1'; -- Pulse to start read
+                vio_axi_read_start <= '1'; -- Pulse to start read
             end if ;
             
             if (vio_fifo_wr_en_pipe(1) = '0' and vio_fifo_wr_en_pipe(0) = '1') then
                 fifo_wr_en <= '1';
             end if ;
             
-            if (vio_iic_start_write_pipe(1) = '0' and vio_iic_start_write_pipe(0) = '1') then
-                iic_start_write <= '1';
+            if (vio_iic_write_start_pipe(1) = '0' and vio_iic_write_start_pipe(0) = '1') then
+                iic_write_start <= '1';
             end if ;
             
             
         end if ;
     end process ;
     
+    -- Process to reset AXI-IIC core
+    process (clk_i, reset_i) begin
+        if (reset_i = '1') then
+            iic_reset_seq_active <= '0';
+            
+            iic_reset_axi_write_start  <= '0';
+            iic_reset_axi_write_addr   <= (others => '0');
+            iic_reset_axi_write_data   <= (others => '0');
+            
+            fifo_reset <= '0';
+            
+            iic_reset_state <= C_IIC_RESET_STATE_RESET;
+            iic_reset_state_next <= C_IIC_RESET_STATE_RESET;
+            
+        elsif rising_edge(clk_i) then
+            
+            -- Initialize signals that can be pulsed in a state
+            iic_reset_axi_write_start  <= '0';
+            fifo_reset <= '0';
+        
+            case iic_reset_state is
+            when C_IIC_RESET_STATE_RESET =>
+                iic_reset_seq_active <= '0';
+                iic_reset_axi_write_addr   <= (others => '0');
+                iic_reset_axi_write_data   <= (others => '0');
+                
+                -- Immediately transition to start a reset sequence
+                iic_reset_state <= C_IIC_RESET_STATE_FLUSH_TX_FIFO;
+            
+            when C_IIC_RESET_STATE_IDLE =>
+                -- When another process signals an error state begin reset sequence
+                if ((intr_error_flag = '1') or (iic_write_error_flag = '1')) then
+                    iic_reset_seq_active <= '1';
+                    iic_reset_state <= C_IIC_RESET_STATE_FLUSH_TX_FIFO;
+                end if ;
+            
+            when C_IIC_RESET_STATE_WAIT_FOR_AXI_WRITE =>
+                -- Wait for write to finish, then transition to next state
+                if (axi_write_done = '1') then
+                    iic_reset_state <= iic_reset_state_next;
+                end if ;
+            
+            when C_IIC_RESET_STATE_FLUSH_TX_FIFO =>
+                -- Reset the external TX data FIFO and the IIC_TX_FIFO
+                fifo_reset <= '1';
+                
+                iic_reset_axi_write_start <= '1';
+                iic_reset_axi_write_addr  <= C_IIC_REG_CR;
+                iic_reset_axi_write_data  <= C_IIC_REG_CR_TX_FIFO_RESET_MASK or C_IIC_REG_CR_IIC_ENABLE_MASK;
+                
+                -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                iic_reset_state <= C_IIC_RESET_STATE_WAIT_FOR_AXI_WRITE;
+                iic_reset_state_next <= C_IIC_RESET_STATE_SOFT_RESET;
+            
+            when C_IIC_RESET_STATE_SOFT_RESET =>
+                iic_reset_axi_write_start <= '1';
+                iic_reset_axi_write_addr  <= C_IIC_REG_SOFTR;
+                iic_reset_axi_write_data  <= C_IIC_REG_SOFTR_RESET_VALUE;
+                
+                -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                iic_reset_state <= C_IIC_RESET_STATE_WAIT_FOR_AXI_WRITE;
+                iic_reset_state_next <= C_IIC_RESET_STATE_ENABLE_GLOBAL_INTR;
+            
+            when C_IIC_RESET_STATE_ENABLE_GLOBAL_INTR =>
+                iic_reset_axi_write_start <= '1';
+                iic_reset_axi_write_addr  <= C_IIC_REG_GIE;
+                iic_reset_axi_write_data  <= C_IIC_REG_GIE_ENABLE_MASK;
+                
+                -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                iic_reset_state <= C_IIC_RESET_STATE_WAIT_FOR_AXI_WRITE;
+                iic_reset_state_next <= C_IIC_RESET_STATE_RESET_COMPLETE;
+            
+            when C_IIC_RESET_STATE_RESET_COMPLETE =>
+                iic_reset_seq_active <= '0';
+                
+                -- Wait for all error flags to clear then return to idle
+                if ((intr_error_flag = '0') and (iic_write_error_flag = '0')) then
+                    iic_reset_state <= C_IIC_RESET_STATE_IDLE;
+                end if ;    
+            
+            when others =>
+                iic_reset_state <= C_IIC_RESET_STATE_RESET;
+            end case ;
+        
+        end if ;
+        
+    end process ;
+    
     -- Process to read interrupt status register on rising edge of interrupt
     process (clk_i, reset_i) begin
         if (reset_i = '1') then
             iic_intr_buff <= '0';
+            intr_error_flag <= '0';
             intr_status_reg <= (others => '0');
-            
-            intr_read_axi_start <= '0';
-            intr_read_addr <= (others => '0');
+                        
+            intr_axi_read_start <= '0';
+            intr_axi_read_addr <= (others => '0');
             
             intr_state <= C_INTR_STATE_RESET;
             intr_state_next <= C_INTR_STATE_RESET;
@@ -514,66 +715,77 @@ begin
             
             -- Initialize signals that can be pulsed in a state
             iic_intr_buff <= iic_intr;
-            intr_read_axi_start <= '0';
+            intr_axi_read_start <= '0';
             
-            case intr_state is
-            when C_INTR_STATE_RESET =>
-                iic_intr_buff <= '0';
-                intr_status_reg <= (others => '0');
-                intr_read_addr <= (others => '0');
-                
-                -- Immediately transition to C_INTR_STATE_IDLE
-                intr_state <= C_INTR_STATE_IDLE;
-                
-            when C_INTR_STATE_IDLE =>
-                -- Wait for interrupt rising edge to transition to start interrupt sequence
-                if (iic_intr_buff = '0' and iic_intr = '1') then
-                    intr_state <= C_INTR_STATE_READ_ISR;
-                end if ;
-                
-            when C_INTR_STATE_WAIT_FOR_AXI_READ =>
-                -- Wait for read to finish, then transition to next state
-                if (axi_read_done = '1') then
-                    -- Copy AXI read value to intr_status_reg
-                    intr_status_reg <= read_data_buf;
-                    intr_state <= intr_state_next;
-                end if ;
-                
-            when C_INTR_STATE_READ_ISR =>
-                intr_read_axi_start <= '1';
-                intr_read_addr <= C_IIC_REG_ISR;
-                
-                -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                intr_state <= C_INTR_STATE_WAIT_FOR_AXI_READ;
-                intr_state_next <= C_INTR_STATE_WAITING_CLEAR;
-                
-            when C_INTR_STATE_WAITING_CLEAR =>              
-                -- Wait for interrupt to clear to transition to C_INTR_STATE_IDLE
-                if (iic_intr = '0') then
-                    intr_status_reg <= (others => '0');
-                    intr_state <= C_INTR_STATE_IDLE;
-                end if ;
-                
-            when others =>
+            -- Hold in reset until reset sequence is complete
+            if (iic_reset_seq_active = '1') then
                 intr_state <= C_INTR_STATE_RESET;
-            end case ;
                 
+            else
+            
+                case intr_state is
+                when C_INTR_STATE_RESET =>
+                    iic_intr_buff <= '0';
+                    intr_error_flag <= '0';
+                    intr_status_reg <= (others => '0');
+                    intr_axi_read_addr <= (others => '0');
+                    
+                    -- Immediately transition to C_INTR_STATE_IDLE
+                    intr_state <= C_INTR_STATE_IDLE;
+                    
+                when C_INTR_STATE_IDLE =>
+                    -- Wait for interrupt rising edge to transition to start interrupt sequence
+                    if (iic_intr_buff = '0' and iic_intr = '1') then
+                        intr_state <= C_INTR_STATE_READ_ISR;
+                    end if ;
+                    
+                when C_INTR_STATE_WAIT_FOR_AXI_READ =>
+                    -- Wait for read to finish, then transition to next state
+                    if (axi_read_done = '1') then
+                        -- Copy AXI read value to intr_status_reg
+                        intr_status_reg <= read_data_buf;
+                        intr_state <= intr_state_next;
+                    end if ;
+                    
+                when C_INTR_STATE_READ_ISR =>
+                    intr_axi_read_start <= '1';
+                    intr_axi_read_addr <= C_IIC_REG_ISR;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    intr_state <= C_INTR_STATE_WAIT_FOR_AXI_READ;
+                    intr_state_next <= C_INTR_STATE_WAITING_CLEAR;
+                    
+                when C_INTR_STATE_WAITING_CLEAR =>              
+                    -- If active interrupt associated with an error, set error flag
+                    if (unsigned(intr_status_reg and C_IIC_REG_ISR_IER_GENERAL_ERROR_MASK) /= 0) then
+                        intr_state <= C_INTR_STATE_ERROR;
+                    
+                    -- Wait for interrupt to clear to transition to C_INTR_STATE_IDLE
+                    elsif (iic_intr = '0') then
+                        intr_status_reg <= (others => '0');
+                        intr_state <= C_INTR_STATE_IDLE;
+                    end if ;
+                    
+                when C_INTR_STATE_ERROR =>
+                    intr_error_flag <= '1';
+                
+                when others =>
+                    intr_state <= C_INTR_STATE_RESET;
+                end case ;
+                
+            end if ;        
         end if ;
     end process ;
     
-    -- Process to perform full IIC write transaction
+    -- Process to perform IIC write transaction
     process (clk_i, reset_i) begin
         if (reset_i = '1') then
-            iic_start_reset_seq <= '0';
-            iic_reset_seq_done  <= '0';
+            iic_axi_write_start <= '0';
+            iic_axi_write_addr  <= (others => '0');
+            iic_axi_write_data  <= (others => '0');
             
-            iic_write_axi_start <= '0';
-            iic_read_axi_start  <= '0';
-            iic_write_addr      <= (others => '0');
-            iic_read_addr       <= (others => '0');
-            iic_write_data      <= (others => '0');
-            
-            iic_fifo_rd_en      <= '0';
+            iic_fifo_rd_en          <= '0';
+            iic_write_error_flag    <= '0';
             
             iic_write_state <= C_IIC_STATE_RESET;
             iic_write_state_next <= C_IIC_STATE_RESET;
@@ -581,186 +793,200 @@ begin
         elsif rising_edge(clk_i) then
             
             -- Initialize signals that can be pulsed in a state
-            iic_write_axi_start <= '0';
+            iic_axi_write_start <= '0';
             iic_fifo_rd_en <= '0';
-        
-            case iic_write_state is
-            when C_IIC_STATE_RESET =>
-                iic_read_axi_start  <= '0';
-                iic_write_addr      <= (others => '0');
-                iic_read_addr       <= (others => '0');
-                iic_write_data      <= (others => '0');
-                
-                iic_write_state <= C_IIC_STATE_IDLE;
-                
-            when C_IIC_STATE_IDLE =>
-                -- Wait for external signal to start write sequence
-                if (iic_start_write = '1') then
-                    iic_write_state <= C_IIC_STATE_FLUSH_TX_FIFO;
-                end if ;
-                
-            when C_IIC_STATE_WAIT_FOR_AXI_WRITE =>
-                -- Wait for write to finish, then transition to next state
-                if (axi_write_done = '1') then
-                    iic_write_state <= iic_write_state_next;
-                end if ;
             
-            when C_IIC_STATE_FLUSH_TX_FIFO =>
-                iic_write_axi_start <= '1';
-                iic_write_addr      <= C_IIC_REG_CR;
-                iic_write_data      <= C_IIC_REG_CR_TX_FIFO_RESET_MASK or C_IIC_REG_CR_IIC_ENABLE_MASK;
+            -- Hold in reset until reset sequence is complete
+            if (iic_reset_seq_active = '1') then
+                iic_write_state <= C_IIC_STATE_RESET;
                 
-                -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
-                iic_write_state_next <= C_IIC_STATE_NORMAL_TX_FIFO;
-                
-            when C_IIC_STATE_NORMAL_TX_FIFO =>
-                iic_write_axi_start <= '1';
-                iic_write_addr      <= C_IIC_REG_CR;
-                iic_write_data      <= C_IIC_REG_CR_TX_MASK or C_IIC_REG_CR_IIC_ENABLE_MASK;
-                
-                -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
-                iic_write_state_next <= C_IIC_STATE_ENABLE_TX_FIFO_INTR;
-                
-            when C_IIC_STATE_ENABLE_TX_FIFO_INTR =>
-                iic_write_axi_start <= '1';
-                iic_write_addr      <= C_IIC_REG_IER;
-                iic_write_data      <= C_IIC_REG_ISR_IER_TX_FIFO_EMPTY_MASK;
-                
-                -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
-                iic_write_state_next <= C_IIC_STATE_WRITE_TX_FIFO;
+            else
             
-            when C_IIC_STATE_WRITE_TX_FIFO =>
-                -- If not final word, continue writing to TX_FIFO
-                if (fifo_valid = '1' and unsigned(fifo_data_count) > 1) then
-                    iic_write_axi_start <= '1';
-                    iic_write_addr      <= C_IIC_REG_TX_FIFO;
-                    iic_write_data      <= (iic_write_data'length - 1 downto fifo_dout'length => '0') & fifo_dout;
-                    iic_fifo_rd_en      <= '1';
+                case iic_write_state is
+                when C_IIC_STATE_RESET =>
+                    iic_axi_write_addr  <= (others => '0');
+                    iic_axi_write_data  <= (others => '0');
+                    iic_write_error_flag <= '0';
+                    iic_write_state <= C_IIC_STATE_IDLE;
                     
-                    iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
-                    iic_write_state_next <= C_IIC_STATE_WRITE_TX_FIFO;
-                    
-                elsif (fifo_valid = '1' and unsigned(fifo_data_count) = 1) then
-                    iic_write_state <= C_IIC_STATE_START_TX;
-                else 
-                    iic_write_state <= C_IIC_STATE_WRITE_ERROR;
-                end if ;
-            
-            when C_IIC_STATE_START_TX =>
-                iic_write_axi_start <= '1';
-                iic_write_addr      <= C_IIC_REG_CR;
-                iic_write_data      <= C_IIC_REG_CR_TX_MASK or C_IIC_REG_CR_MSMS_MASK or C_IIC_REG_CR_IIC_ENABLE_MASK;
-                
-                -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
-                iic_write_state_next <= C_IIC_STATE_WAIT_FOR_TX_EMPTY_INTR;
-                
-            when C_IIC_STATE_WAIT_FOR_TX_EMPTY_INTR =>
-                -- Wait for interrupt to occur and interrupt status to be read
-                if (intr_state = C_INTR_STATE_WAITING_CLEAR) then
-                    -- Check for expected interrupt on TX_FIFO_EMPTY
-                    if ((intr_status_reg and C_IIC_REG_ISR_IER_TX_FIFO_EMPTY_MASK) = C_IIC_REG_ISR_IER_TX_FIFO_EMPTY_MASK) then
-                        iic_write_state <= C_IIC_STATE_TOGGLE_ISR_NOT_BUSY;
-                    else
-                        iic_write_state <= C_IIC_STATE_WRITE_ERROR;
+                when C_IIC_STATE_IDLE =>
+                    -- Wait for external signal to start write sequence
+                    if (iic_write_start = '1') then
+                        iic_write_state <= C_IIC_STATE_FLUSH_TX_FIFO;
                     end if ;
-                end if ;
-            
-            when C_IIC_STATE_TOGGLE_ISR_NOT_BUSY =>
-                iic_write_axi_start <= '1';
-                iic_write_addr      <= C_IIC_REG_ISR;
-                iic_write_data      <= intr_status_reg;
+                    
+                when C_IIC_STATE_WAIT_FOR_AXI_WRITE =>
+                    -- Wait for write to finish, then transition to next state
+                    if (axi_write_done = '1') then
+                        iic_write_state <= iic_write_state_next;
+                    end if ;
                 
-                -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
-                iic_write_state_next <= C_IIC_STATE_ENABLE_NOT_BUSY_INTR;
-                
-            when C_IIC_STATE_ENABLE_NOT_BUSY_INTR =>
-                iic_write_axi_start <= '1';
-                iic_write_addr      <= C_IIC_REG_IER;
-                iic_write_data      <= C_IIC_REG_ISR_IER_BUS_NOT_BUSY_MASK;
-                
-                -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
-                iic_write_state_next <= C_IIC_STATE_WAIT_FOR_INTR_CLEAR;
-                
-            when C_IIC_STATE_WAIT_FOR_INTR_CLEAR =>
-                -- Wait for interrupt to clear and interrupt controller to return to idle
-                if (intr_state = C_INTR_STATE_IDLE) then
-                    iic_write_state <= C_IIC_STATE_SETUP_CR_STOP;
-                end if ;
-            
-            when C_IIC_STATE_SETUP_CR_STOP =>
-                iic_write_axi_start <= '1';
-                iic_write_addr      <= C_IIC_REG_CR;
-                iic_write_data      <= C_IIC_REG_CR_TX_MASK or C_IIC_REG_CR_IIC_ENABLE_MASK;
-                
-                -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
-                iic_write_state_next <= C_IIC_STATE_WRITE_FINAL_TX_FIFO;
-                
-            when C_IIC_STATE_WRITE_FINAL_TX_FIFO =>
-                -- Get final word and write to TX_FIFO
-                if (fifo_valid = '1' and unsigned(fifo_data_count) = 1) then
-                    iic_write_axi_start <= '1';
-                    iic_write_addr      <= C_IIC_REG_TX_FIFO;
-                    iic_write_data      <= (iic_write_data'length - 1 downto fifo_dout'length => '0') & fifo_dout;
-                    iic_fifo_rd_en      <= '1';
+                when C_IIC_STATE_FLUSH_TX_FIFO =>
+                    iic_axi_write_start <= '1';
+                    iic_axi_write_addr  <= C_IIC_REG_CR;
+                    iic_axi_write_data  <= C_IIC_REG_CR_TX_FIFO_RESET_MASK or C_IIC_REG_CR_IIC_ENABLE_MASK;
                     
                     -- Immediately transition to wait for AXI transaction to complete, prepare next state
                     iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
-                    iic_write_state_next <= C_IIC_STATE_WAIT_FOR_NOT_BUSY_INTR;
+                    iic_write_state_next <= C_IIC_STATE_NORMAL_TX_FIFO;
                     
-                else 
-                    iic_write_state <= C_IIC_STATE_WRITE_ERROR;
-                end if ; 
+                when C_IIC_STATE_NORMAL_TX_FIFO =>
+                    iic_axi_write_start <= '1';
+                    iic_axi_write_addr  <= C_IIC_REG_CR;
+                    iic_axi_write_data  <= C_IIC_REG_CR_TX_MASK or C_IIC_REG_CR_IIC_ENABLE_MASK;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_write_state_next <= C_IIC_STATE_ENABLE_TX_FIFO_INTR;
+                    
+                when C_IIC_STATE_ENABLE_TX_FIFO_INTR =>
+                    iic_axi_write_start <= '1';
+                    iic_axi_write_addr  <= C_IIC_REG_IER;
+                    iic_axi_write_data  <= C_IIC_REG_ISR_IER_GENERAL_ERROR_MASK or C_IIC_REG_ISR_IER_TX_FIFO_EMPTY_MASK;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_write_state_next <= C_IIC_STATE_WRITE_TX_FIFO;
                 
-            when C_IIC_STATE_WAIT_FOR_NOT_BUSY_INTR =>
-                -- Wait for interrupt to occur and interrupt status to be read
-                if (intr_state = C_INTR_STATE_WAITING_CLEAR) then
-                    -- Check for expected interrupt on BUS_NOT_BUSY
-                    if ((intr_status_reg and C_IIC_REG_ISR_IER_BUS_NOT_BUSY_MASK) = C_IIC_REG_ISR_IER_BUS_NOT_BUSY_MASK) then
-                        iic_write_state <= C_IIC_STATE_TOGGLE_ISR_TX_EMPTY;
-                    else
+                when C_IIC_STATE_WRITE_TX_FIFO =>
+                    -- If not final word, continue writing to TX_FIFO
+                    if (fifo_valid = '1' and unsigned(fifo_data_count) > 1) then
+                        iic_axi_write_start <= '1';
+                        iic_axi_write_addr  <= C_IIC_REG_TX_FIFO;
+                        iic_axi_write_data  <= (iic_axi_write_data'length - 1 downto fifo_dout'length => '0') & fifo_dout;
+                        iic_fifo_rd_en      <= '1';
+                        
+                        iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
+                        iic_write_state_next <= C_IIC_STATE_WRITE_TX_FIFO;
+                        
+                    elsif (fifo_valid = '1' and unsigned(fifo_data_count) = 1) then
+                        iic_write_state <= C_IIC_STATE_START_TX;
+                    else 
                         iic_write_state <= C_IIC_STATE_WRITE_ERROR;
                     end if ;
-                end if ;
-            
-            when C_IIC_STATE_TOGGLE_ISR_TX_EMPTY =>
-                iic_write_axi_start <= '1';
-                iic_write_addr      <= C_IIC_REG_ISR;
-                iic_write_data      <= intr_status_reg;
                 
-                -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
-                iic_write_state_next <= C_IIC_STATE_DISABLE_ALL_INTR;
+                when C_IIC_STATE_START_TX =>
+                    iic_axi_write_start <= '1';
+                    iic_axi_write_addr  <= C_IIC_REG_CR;
+                    iic_axi_write_data  <= C_IIC_REG_CR_TX_MASK or C_IIC_REG_CR_MSMS_MASK or C_IIC_REG_CR_IIC_ENABLE_MASK;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_write_state_next <= C_IIC_STATE_WAIT_FOR_TX_EMPTY_INTR;
+                    
+                when C_IIC_STATE_WAIT_FOR_TX_EMPTY_INTR =>
+                    -- Wait for interrupt to occur and interrupt status to be read
+                    if (intr_state = C_INTR_STATE_WAITING_CLEAR) then
+                        -- Check for expected interrupt on TX_FIFO_EMPTY
+                        if ((intr_status_reg and C_IIC_REG_ISR_IER_TX_FIFO_EMPTY_MASK) = C_IIC_REG_ISR_IER_TX_FIFO_EMPTY_MASK) then
+                            iic_write_state <= C_IIC_STATE_TOGGLE_ISR_NOT_BUSY;
+                        else
+                            iic_write_state <= C_IIC_STATE_WRITE_ERROR;
+                        end if ;
+                    end if ;
                 
-            when C_IIC_STATE_DISABLE_ALL_INTR =>
-                iic_write_axi_start <= '1';
-                iic_write_addr      <= C_IIC_REG_IER;
-                iic_write_data      <= (others => '0');
+                when C_IIC_STATE_TOGGLE_ISR_NOT_BUSY =>
+                    iic_axi_write_start <= '1';
+                    iic_axi_write_addr  <= C_IIC_REG_ISR;
+                    iic_axi_write_data  <= intr_status_reg;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_write_state_next <= C_IIC_STATE_ENABLE_NOT_BUSY_INTR;
+                    
+                when C_IIC_STATE_ENABLE_NOT_BUSY_INTR =>
+                    iic_axi_write_start <= '1';
+                    iic_axi_write_addr  <= C_IIC_REG_IER;
+                    iic_axi_write_data  <= C_IIC_REG_ISR_IER_GENERAL_ERROR_MASK or C_IIC_REG_ISR_IER_BUS_NOT_BUSY_MASK;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_write_state_next <= C_IIC_STATE_WAIT_FOR_INTR_CLEAR;
+                    
+                when C_IIC_STATE_WAIT_FOR_INTR_CLEAR =>
+                    -- Wait for interrupt to clear and interrupt controller to return to idle
+                    if (intr_state = C_INTR_STATE_IDLE) then
+                        iic_write_state <= C_IIC_STATE_SETUP_CR_STOP;
+                    end if ;
                 
-                -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
-                iic_write_state_next <= C_IIC_STATE_TRANSACTION_COMPLETE;
+                when C_IIC_STATE_SETUP_CR_STOP =>
+                    iic_axi_write_start <= '1';
+                    iic_axi_write_addr  <= C_IIC_REG_CR;
+                    iic_axi_write_data  <= C_IIC_REG_CR_TX_MASK or C_IIC_REG_CR_IIC_ENABLE_MASK;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_write_state_next <= C_IIC_STATE_WRITE_FINAL_TX_FIFO;
+                    
+                when C_IIC_STATE_WRITE_FINAL_TX_FIFO =>
+                    -- Get final word and write to TX_FIFO
+                    if (fifo_valid = '1' and unsigned(fifo_data_count) = 1) then
+                        iic_axi_write_start <= '1';
+                        iic_axi_write_addr  <= C_IIC_REG_TX_FIFO;
+                        iic_axi_write_data  <= (iic_axi_write_data'length - 1 downto fifo_dout'length => '0') & fifo_dout;
+                        iic_fifo_rd_en      <= '1';
+                        
+                        -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                        iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
+                        iic_write_state_next <= C_IIC_STATE_WAIT_FOR_NOT_BUSY_INTR;
+                        
+                    else 
+                        iic_write_state <= C_IIC_STATE_WRITE_ERROR;
+                    end if ; 
+                    
+                when C_IIC_STATE_WAIT_FOR_NOT_BUSY_INTR =>
+                    -- Wait for interrupt to occur and interrupt status to be read
+                    if (intr_state = C_INTR_STATE_WAITING_CLEAR) then
+                        -- Check for expected interrupt on BUS_NOT_BUSY
+                        if ((intr_status_reg and C_IIC_REG_ISR_IER_BUS_NOT_BUSY_MASK) = C_IIC_REG_ISR_IER_BUS_NOT_BUSY_MASK) then
+                            iic_write_state <= C_IIC_STATE_TOGGLE_ISR_TX_EMPTY;
+                        else
+                            iic_write_state <= C_IIC_STATE_WRITE_ERROR;
+                        end if ;
+                    end if ;
                 
-            when C_IIC_STATE_TRANSACTION_COMPLETE =>
-                -- Wait for interrupt to clear and interrupt controller to return to idle
-                if (intr_state = C_INTR_STATE_IDLE) then
-                    iic_write_state <= C_IIC_STATE_IDLE;
-                end if ;        
-            
-            when C_IIC_STATE_WRITE_ERROR =>
-                -- Reset controller
+                when C_IIC_STATE_TOGGLE_ISR_TX_EMPTY =>
+                    iic_axi_write_start <= '1';
+                    iic_axi_write_addr  <= C_IIC_REG_ISR;
+                    iic_axi_write_data  <= intr_status_reg;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_write_state_next <= C_IIC_STATE_DISABLE_CONTROLLER;
+                    
+                when C_IIC_STATE_DISABLE_CONTROLLER =>
+                    iic_axi_write_start <= '1';
+                    iic_axi_write_addr  <= C_IIC_REG_CR;
+                    iic_axi_write_data  <= (others => '0');
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_write_state_next <= C_IIC_STATE_DISABLE_ALL_INTR;
                 
-            when others =>
-                iic_write_state <= C_IIC_STATE_IDLE;
-                iic_write_state_next <= C_IIC_STATE_IDLE;
-            end case ;
-            
+                when C_IIC_STATE_DISABLE_ALL_INTR =>
+                    iic_axi_write_start <= '1';
+                    iic_axi_write_addr  <= C_IIC_REG_IER;
+                    iic_axi_write_data  <= (others => '0');
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_write_state <= C_IIC_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_write_state_next <= C_IIC_STATE_TRANSACTION_COMPLETE;
+                    
+                when C_IIC_STATE_TRANSACTION_COMPLETE =>
+                    -- Wait for interrupt to clear and interrupt controller to return to idle
+                    if (intr_state = C_INTR_STATE_IDLE) then
+                        iic_write_state <= C_IIC_STATE_IDLE;
+                    end if ;        
+                
+                when C_IIC_STATE_WRITE_ERROR =>
+                    -- Latch in error state to force IIC controller reset sequence
+                    iic_write_error_flag <= '1';
+                    
+                when others =>
+                    iic_write_state <= C_IIC_STATE_WRITE_ERROR;
+                end case ;
+                
+            end if ;
         end if ;
     end process ;
     
