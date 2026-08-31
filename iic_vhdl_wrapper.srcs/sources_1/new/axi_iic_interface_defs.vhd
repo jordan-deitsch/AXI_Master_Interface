@@ -25,6 +25,22 @@ use ieee.numeric_std.all;
 
 package axi_iic_interface_defs is
     
+        type T_AXI_WRITE_STATE is 
+    (
+        C_AXI_WRITE_STATE_RESET,
+        C_AXI_WRITE_STATE_IDLE,
+        C_AXI_WRITE_STATE_WRITE_DATA,
+        C_AXI_WRITE_STATE_WRITE_RESPONSE
+    );
+    
+    type T_AXI_READ_STATE is 
+    (
+        C_AXI_READ_STATE_RESET,
+        C_AXI_READ_STATE_IDLE,
+        C_AXI_READ_STATE_READ_ADDRESS,
+        C_AXI_READ_STATE_READ_DATA
+    );
+    
     -- IIC Reset states
     type T_IIC_RESET_STATE is
     (
@@ -51,27 +67,30 @@ package axi_iic_interface_defs is
     -- IIC Write states
     type T_IIC_WRITE_STATE is
     (
-        C_IIC_STATE_RESET,
-        C_IIC_STATE_IDLE,
-        C_IIC_STATE_WAIT_FOR_AXI_WRITE,
-        C_IIC_STATE_FLUSH_TX_FIFO,
-        C_IIC_STATE_NORMAL_TX_FIFO,
-        C_IIC_STATE_ENABLE_TX_FIFO_INTR,
-        C_IIC_STATE_WRITE_TX_FIFO,
-        C_IIC_STATE_START_TX,
-        C_IIC_STATE_WAIT_FOR_TX_EMPTY_INTR,
-        C_IIC_STATE_TOGGLE_ISR_NOT_BUSY,
-        C_IIC_STATE_ENABLE_NOT_BUSY_INTR,
-        C_IIC_STATE_WAIT_FOR_INTR_CLEAR,
-        C_IIC_STATE_SETUP_CR_STOP,
-        C_IIC_STATE_WRITE_FINAL_TX_FIFO,
-        C_IIC_STATE_WAIT_FOR_NOT_BUSY_INTR,
-        C_IIC_STATE_TOGGLE_ISR_TX_EMPTY,
-        C_IIC_STATE_DISABLE_CONTROLLER,
-        C_IIC_STATE_DISABLE_ALL_INTR,
-        C_IIC_STATE_TRANSACTION_COMPLETE,
-        C_IIC_STATE_WRITE_ERROR
+        C_IIC_WRITE_STATE_RESET,
+        C_IIC_WRITE_STATE_IDLE,
+        C_IIC_WRITE_STATE_WAIT_FOR_AXI_WRITE,
+        C_IIC_WRITE_STATE_FLUSH_TX_FIFO,
+        C_IIC_WRITE_STATE_NORMAL_TX_FIFO,
+        C_IIC_WRITE_STATE_ENABLE_TX_FIFO_INTR,
+        C_IIC_WRITE_STATE_WRITE_TX_FIFO,
+        C_IIC_WRITE_STATE_START_TX,
+        C_IIC_WRITE_STATE_WAIT_FOR_TX_EMPTY_INTR,
+        C_IIC_WRITE_STATE_TOGGLE_ISR_NOT_BUSY,
+        C_IIC_WRITE_STATE_ENABLE_NOT_BUSY_INTR,
+        C_IIC_WRITE_STATE_WAIT_FOR_INTR_CLEAR,
+        C_IIC_WRITE_STATE_SETUP_CR_STOP,
+        C_IIC_WRITE_STATE_WRITE_FINAL_TX_FIFO,
+        C_IIC_WRITE_STATE_WAIT_FOR_NOT_BUSY_INTR,
+        C_IIC_WRITE_STATE_TOGGLE_ISR_TX_EMPTY,
+        C_IIC_WRITE_STATE_DISABLE_CONTROLLER,
+        C_IIC_WRITE_STATE_DISABLE_ALL_INTR,
+        C_IIC_WRITE_STATE_TRANSACTION_COMPLETE,
+        C_IIC_WRITE_STATE_ERROR
     );
+    
+    -- FIFO operation constants
+    constant C_IIC_MIN_TX_WORDS : integer := 2;
     
     -- IIC Register Offsets
     constant C_IIC_REG_GIE          : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#01C#, 9));

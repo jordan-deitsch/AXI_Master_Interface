@@ -89,20 +89,20 @@ architecture rtl of gpio_interface is
     signal read_resp_buf    : std_logic_vector (1 downto 0) := (others => '0');
     signal read_axi_start   : std_logic := '0';
     
-    constant C_W_STATE_RESET                : unsigned (3 downto 0) := to_unsigned(16#0#, 4);
-    constant C_W_STATE_IDLE                 : unsigned (3 downto 0) := to_unsigned(16#1#, 4);
-    constant C_W_STATE_WRITE_DATA           : unsigned (3 downto 0) := to_unsigned(16#2#, 4);
-    constant C_W_STATE_WRITE_RESPONSE       : unsigned (3 downto 0) := to_unsigned(16#3#, 4);
-    constant C_W_STATE_TRANSACTION_COMPLETE : unsigned (3 downto 0) := to_unsigned(16#4#, 4);
+    constant C_AXI_WRITE_STATE_RESET                : unsigned (3 downto 0) := to_unsigned(16#0#, 4);
+    constant C_AXI_WRITE_STATE_IDLE                 : unsigned (3 downto 0) := to_unsigned(16#1#, 4);
+    constant C_AXI_WRITE_STATE_WRITE_DATA           : unsigned (3 downto 0) := to_unsigned(16#2#, 4);
+    constant C_AXI_WRITE_STATE_WRITE_RESPONSE       : unsigned (3 downto 0) := to_unsigned(16#3#, 4);
+    constant C_AXI_WRITE_STATE_TRANSACTION_COMPLETE : unsigned (3 downto 0) := to_unsigned(16#4#, 4);
     
-    constant C_R_STATE_RESET                :  unsigned (3 downto 0) := to_unsigned(16#0#, 4);
-    constant C_R_STATE_IDLE                 :  unsigned (3 downto 0) := to_unsigned(16#1#, 4);
-    constant C_R_STATE_READ_ADDRESS         :  unsigned (3 downto 0) := to_unsigned(16#2#, 4);
-    constant C_R_STATE_READ_DATA            :  unsigned (3 downto 0) := to_unsigned(16#3#, 4);
-    constant C_R_STATE_TRANSACTION_COMPLETE :  unsigned (3 downto 0) := to_unsigned(16#4#, 4);
+    constant C_AXI_READ_STATE_RESET                :  unsigned (3 downto 0) := to_unsigned(16#0#, 4);
+    constant C_AXI_READ_STATE_IDLE                 :  unsigned (3 downto 0) := to_unsigned(16#1#, 4);
+    constant C_AXI_READ_STATE_READ_ADDRESS         :  unsigned (3 downto 0) := to_unsigned(16#2#, 4);
+    constant C_AXI_READ_STATE_READ_DATA            :  unsigned (3 downto 0) := to_unsigned(16#3#, 4);
+    constant C_AXI_READ_STATE_TRANSACTION_COMPLETE :  unsigned (3 downto 0) := to_unsigned(16#4#, 4);
     
-    signal write_state  : unsigned (3 downto 0) := C_W_STATE_IDLE;
-    signal read_state   : unsigned (3 downto 0) := C_R_STATE_IDLE;
+    signal write_state  : unsigned (3 downto 0) := C_AXI_WRITE_STATE_IDLE;
+    signal read_state   : unsigned (3 downto 0) := C_AXI_READ_STATE_IDLE;
     
     signal axi_write_busy   : std_logic;
     signal axi_read_busy    : std_logic;
@@ -246,7 +246,7 @@ begin
             write_timeout_counter   <= (others => '0');
             axi_write_busy          <= '0';
             
-            write_state <= C_W_STATE_RESET;
+            write_state <= C_AXI_WRITE_STATE_RESET;
             
         elsif rising_edge(clk_i) then
         
@@ -255,11 +255,11 @@ begin
             -- Reset state machine if timeout occurs
             if (write_timeout_counter > C_TIMEOUT_VALUE) then
                 write_timeout_counter <= (others => '0');
-                write_state <= C_W_STATE_RESET;
+                write_state <= C_AXI_WRITE_STATE_RESET;
             else
         
                 case write_state is
-                when C_W_STATE_RESET =>
+                when C_AXI_WRITE_STATE_RESET =>
                     m2s_axi_awaddr  <= (others => '0');
                     m2s_axi_awvalid <= '0';
                     m2s_axi_wdata   <= (others => '0');
@@ -270,9 +270,9 @@ begin
                     write_timeout_counter   <= (others => '0');
                     axi_write_busy          <= '0';
                     
-                    write_state <= C_W_STATE_IDLE;
+                    write_state <= C_AXI_WRITE_STATE_IDLE;
                 
-                when C_W_STATE_IDLE =>
+                when C_AXI_WRITE_STATE_IDLE =>
                     
                     -- Initialize handshake signals
                     m2s_axi_awvalid         <= '0';
@@ -281,13 +281,13 @@ begin
                     axi_write_busy          <= '0';   
                     write_timeout_counter   <= (others => '0');             
                     
-                    -- Wait for external pulse of write_axi_start to transition to C_W_STATE_WRITE_DATA
+                    -- Wait for external pulse of write_axi_start to transition to C_AXI_WRITE_STATE_WRITE_DATA
                     if (write_axi_start = '1') then
-                        write_state <= C_W_STATE_WRITE_DATA;
+                        write_state <= C_AXI_WRITE_STATE_WRITE_DATA;
                         axi_write_busy <= '1';
                     end if ;
                 
-                when C_W_STATE_WRITE_DATA =>
+                when C_AXI_WRITE_STATE_WRITE_DATA =>
                 
                     -- Setup write address and signal valid write address
                     m2s_axi_awaddr <= write_addr_buf;
@@ -297,32 +297,32 @@ begin
                     m2s_axi_wdata <= write_data_buf;
                     m2s_axi_wvalid <= '1';
                     
-                    -- Wait for s2m_axi_awready to transition to C_W_STATE_WRITE_RESPONSE
+                    -- Wait for s2m_axi_awready to transition to C_AXI_WRITE_STATE_WRITE_RESPONSE
                     if (s2m_axi_awready = '1' and s2m_axi_wready = '1') then
                         m2s_axi_awvalid <= '0'; -- Reset handshake valid signal
                         m2s_axi_wvalid  <= '0'; -- Reset handshake valid signal
-                        write_state <= C_W_STATE_WRITE_RESPONSE;
+                        write_state <= C_AXI_WRITE_STATE_WRITE_RESPONSE;
                     end if ;
                 
-                when C_W_STATE_WRITE_RESPONSE =>
+                when C_AXI_WRITE_STATE_WRITE_RESPONSE =>
                 
-                    -- Wait for axi_bvalid to transition to C_W_STATE_TRANSACTION_COMPLETE
+                    -- Wait for axi_bvalid to transition to C_AXI_WRITE_STATE_TRANSACTION_COMPLETE
                     if (s2m_axi_bvalid = '1') then
                         m2s_axi_bready <= '1';
                         write_resp_buf <= s2m_axi_bresp;
-                        write_state <= C_W_STATE_TRANSACTION_COMPLETE;
+                        write_state <= C_AXI_WRITE_STATE_TRANSACTION_COMPLETE;
                     end if ;
                 
-                when C_W_STATE_TRANSACTION_COMPLETE =>
+                when C_AXI_WRITE_STATE_TRANSACTION_COMPLETE =>
                     
                     -- Reset m2s_axi_bready back to 0
                     m2s_axi_bready <= '0';
                     
-                    -- Immediately transition to C_W_STATE_IDLE
-                    write_state <= C_W_STATE_IDLE;
+                    -- Immediately transition to C_AXI_WRITE_STATE_IDLE
+                    write_state <= C_AXI_WRITE_STATE_IDLE;
                     
                 when others =>
-                    write_state <= C_W_STATE_RESET;
+                    write_state <= C_AXI_WRITE_STATE_RESET;
                 end case ;
             end if ;
         end if ;
@@ -340,7 +340,7 @@ begin
             read_timeout_counter    <= (others => '0');
             axi_read_busy           <= '0';
             
-            read_state <= C_R_STATE_RESET;
+            read_state <= C_AXI_READ_STATE_RESET;
             
         elsif rising_edge(clk_i) then
         
@@ -349,11 +349,11 @@ begin
             -- Reset state machine if timeout occurs
             if (read_timeout_counter > C_TIMEOUT_VALUE) then
                 read_timeout_counter <= (others => '0');
-                read_state <= C_R_STATE_RESET;
+                read_state <= C_AXI_READ_STATE_RESET;
             else
         
                 case read_state is
-                when C_R_STATE_RESET =>
+                when C_AXI_READ_STATE_RESET =>
                     m2s_axi_araddr  <= (others => '0');
                     m2s_axi_arvalid <= '0';
                     m2s_axi_rready  <= '0';
@@ -363,9 +363,9 @@ begin
                     read_timeout_counter    <= (others => '0');
                     axi_read_busy           <= '0';
                     
-                    read_state <= C_R_STATE_IDLE;
+                    read_state <= C_AXI_READ_STATE_IDLE;
                 
-                when C_R_STATE_IDLE =>
+                when C_AXI_READ_STATE_IDLE =>
                     
                     -- Initialize handshake signals
                     m2s_axi_arvalid         <= '0';
@@ -373,44 +373,44 @@ begin
                     axi_read_busy           <= '0'; 
                     read_timeout_counter    <= (others => '0');               
                     
-                    -- Wait for external pulse of read_axi_start to transition to C_R_STATE_READ_ADDRESS
+                    -- Wait for external pulse of read_axi_start to transition to C_AXI_READ_STATE_READ_ADDRESS
                     if (read_axi_start = '1') then
-                        read_state <= C_R_STATE_READ_ADDRESS;
+                        read_state <= C_AXI_READ_STATE_READ_ADDRESS;
                         axi_read_busy <= '1';
                     end if ;
                 
-                when C_R_STATE_READ_ADDRESS =>
+                when C_AXI_READ_STATE_READ_ADDRESS =>
                 
                     -- Setup read address and signal valid read address
                     m2s_axi_araddr <= read_addr_buf;
                     m2s_axi_arvalid <= '1';
                     
-                    -- Wait for s2m_axi_arready and transition to C_R_STATE_READ_DATA
+                    -- Wait for s2m_axi_arready and transition to C_AXI_READ_STATE_READ_DATA
                     if (s2m_axi_arready = '1') then
                         m2s_axi_arvalid <= '0'; -- Reset handshake valid signal
-                        read_state <= C_R_STATE_READ_DATA;
+                        read_state <= C_AXI_READ_STATE_READ_DATA;
                     end if ;
                     
-                when C_R_STATE_READ_DATA =>
+                when C_AXI_READ_STATE_READ_DATA =>
                     
-                    -- Wait for s2m_axi_rvalid to read data and transition to C_R_STATE_TRANSACTION_COMPLETE
+                    -- Wait for s2m_axi_rvalid to read data and transition to C_AXI_READ_STATE_TRANSACTION_COMPLETE
                     if (s2m_axi_rvalid = '1') then
                         m2s_axi_rready <= '1';
                         read_data_buf <= s2m_axi_rdata;
                         read_resp_buf <= s2m_axi_rresp;
-                        read_state <= C_R_STATE_TRANSACTION_COMPLETE;
+                        read_state <= C_AXI_READ_STATE_TRANSACTION_COMPLETE;
                     end if ;
                 
-                when C_R_STATE_TRANSACTION_COMPLETE =>
+                when C_AXI_READ_STATE_TRANSACTION_COMPLETE =>
                     
                     -- Reset m2s_axi_rready back to 0
                     m2s_axi_rready  <= '0';
                     
-                    -- Immediately transition to C_R_STATE_IDLE
-                    read_state <= C_R_STATE_IDLE;   
+                    -- Immediately transition to C_AXI_READ_STATE_IDLE
+                    read_state <= C_AXI_READ_STATE_IDLE;   
                 
                 when others =>
-                    read_state <= C_R_STATE_RESET;
+                    read_state <= C_AXI_READ_STATE_RESET;
                 end case ;
             end if ;
         end if ;
