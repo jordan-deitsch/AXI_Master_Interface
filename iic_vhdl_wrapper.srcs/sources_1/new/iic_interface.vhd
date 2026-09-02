@@ -260,10 +260,10 @@ begin
         X"07" when C_IIC_WRITE_STATE_WRITE_TX_FIFO,
         X"08" when C_IIC_WRITE_STATE_START_TX,
         X"09" when C_IIC_WRITE_STATE_WAIT_FOR_TX_FIFO_EMPTY_INTR,
-        X"0A" when C_IIC_WRITE_STATE_ENABLE_NOT_BUSY_INTR,
-        X"0B" when C_IIC_WRITE_STATE_WAIT_FOR_INTR_CLEAR,
-        X"0C" when C_IIC_WRITE_STATE_SETUP_CR_STOP,
-        X"0D" when C_IIC_WRITE_STATE_WRITE_FINAL_TX_FIFO,
+        X"0A" when C_IIC_WRITE_STATE_SETUP_CR_STOP,
+        X"0B" when C_IIC_WRITE_STATE_WRITE_FINAL_TX_FIFO,
+        X"0C" when C_IIC_WRITE_STATE_CLEAR_TX_FIFO_EMPTY_INTR,
+        X"0D" when C_IIC_WRITE_STATE_ENABLE_NOT_BUSY_INTR,
         X"0E" when C_IIC_WRITE_STATE_WAIT_FOR_NOT_BUSY_INTR,
         X"0F" when C_IIC_WRITE_STATE_DISABLE_CONTROLLER,
         X"10" when C_IIC_WRITE_STATE_DISABLE_ALL_INTR,
@@ -295,13 +295,14 @@ begin
         X"14" when C_IIC_READ_STATE_READ_RX_FIFO,
         X"15" when C_IIC_READ_STATE_STORE_RX_READ,
         X"16" when C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR_FINAL,
-        X"17" when C_IIC_READ_STATE_WRITE_CR_STOP,
-        X"18" when C_IIC_READ_STATE_READ_RX_FIFO_FINAL,
-        X"19" when C_IIC_READ_STATE_STORE_RX_READ_FINAL,
-        X"1A" when C_IIC_READ_STATE_DISABLE_CONTROLLER,
-        X"1B" when C_IIC_READ_STATE_DISABLE_ALL_INTR,
-        X"1C" when C_IIC_READ_STATE_TRANSACTION_COMPLETE,
-        X"DD" when C_IIC_READ_STATE_HANG,
+        X"17" when C_IIC_READ_STATE_READ_RX_FIFO_FINAL,
+        X"18" when C_IIC_READ_STATE_STORE_RX_READ_FINAL,
+        X"19" when C_IIC_READ_STATE_ENABLE_NOT_BUSY_INTR,
+        X"1A" when C_IIC_READ_STATE_WRITE_CR_STOP,
+        X"1B" when C_IIC_READ_STATE_WAIT_FOR_NOT_BUSY_INTR,
+        X"1C" when C_IIC_READ_STATE_DISABLE_CONTROLLER,
+        X"1D" when C_IIC_READ_STATE_DISABLE_ALL_INTR,
+        X"1E" when C_IIC_READ_STATE_TRANSACTION_COMPLETE,
         X"FF" when C_IIC_READ_STATE_ERROR;
     
     scl_iobuf : IOBUF
@@ -925,28 +926,14 @@ begin
                     if (iic_intr_state = C_INTR_STATE_WAITING_CLEAR) then
                         -- Check for expected interrupt on TX_FIFO_EMPTY
                         if (unsigned(iic_intr_status_reg and C_IIC_REG_ISR_IER_TX_FIFO_EMPTY_MASK) /= 0) then
-                            iic_write_state <= C_IIC_WRITE_STATE_TOGGLE_ISR;
-                            iic_write_state_next <= C_IIC_WRITE_STATE_ENABLE_NOT_BUSY_INTR;
+--                            iic_write_state <= C_IIC_WRITE_STATE_TOGGLE_ISR;
+--                            iic_write_state_next <= C_IIC_WRITE_STATE_ENABLE_NOT_BUSY_INTR;
+                            iic_write_state <= C_IIC_WRITE_STATE_SETUP_CR_STOP;
                         else
                             iic_write_state <= C_IIC_WRITE_STATE_ERROR;
                         end if ;
                     end if ;
                     
-                when C_IIC_WRITE_STATE_ENABLE_NOT_BUSY_INTR =>
-                    iic_write_axi_write_start <= '1';
-                    iic_write_axi_write_addr  <= C_IIC_REG_IER;
-                    iic_write_axi_write_data  <= C_IIC_MASTER_TX_GENERAL_ERROR_MASK or C_IIC_REG_ISR_IER_BUS_NOT_BUSY_MASK;
-                    
-                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                    iic_write_state <= C_IIC_WRITE_STATE_WAIT_FOR_AXI_WRITE;
-                    iic_write_state_next <= C_IIC_WRITE_STATE_WAIT_FOR_INTR_CLEAR;
-                    
-                when C_IIC_WRITE_STATE_WAIT_FOR_INTR_CLEAR =>
-                    -- Wait for interrupt to clear and interrupt controller to return to idle
-                    if (iic_intr_state = C_INTR_STATE_IDLE) then
-                        iic_write_state <= C_IIC_WRITE_STATE_SETUP_CR_STOP;
-                    end if ;
-                
                 when C_IIC_WRITE_STATE_SETUP_CR_STOP =>
                     iic_write_axi_write_start <= '1';
                     iic_write_axi_write_addr  <= C_IIC_REG_CR;
@@ -957,7 +944,7 @@ begin
                     iic_write_state_next <= C_IIC_WRITE_STATE_WRITE_FINAL_TX_FIFO;
                     
                 when C_IIC_WRITE_STATE_WRITE_FINAL_TX_FIFO =>
-                    -- Get final word and write to TX_FIFO
+                    -- Get final word and write to TX_FIFO to clear throttle condition
                     if (tx_fifo_valid = '1') then
                         iic_write_axi_write_start <= '1';
                         iic_write_axi_write_addr  <= C_IIC_REG_TX_FIFO;
@@ -966,11 +953,29 @@ begin
                         
                         -- Immediately transition to wait for AXI transaction to complete, prepare next state
                         iic_write_state <= C_IIC_WRITE_STATE_WAIT_FOR_AXI_WRITE;
-                        iic_write_state_next <= C_IIC_WRITE_STATE_WAIT_FOR_NOT_BUSY_INTR;
+                        iic_write_state_next <= C_IIC_WRITE_STATE_CLEAR_TX_FIFO_EMPTY_INTR;
                         
                     else 
                         iic_write_state <= C_IIC_WRITE_STATE_ERROR;
                     end if ; 
+                    
+                when C_IIC_WRITE_STATE_CLEAR_TX_FIFO_EMPTY_INTR =>
+                    iic_write_axi_write_start <= '1';
+                    iic_write_axi_write_addr  <= C_IIC_REG_ISR;
+                    iic_write_axi_write_data  <= iic_intr_status_reg;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_write_state <= C_IIC_WRITE_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_write_state_next <= C_IIC_WRITE_STATE_ENABLE_NOT_BUSY_INTR;
+                    
+                when C_IIC_WRITE_STATE_ENABLE_NOT_BUSY_INTR =>
+                    iic_write_axi_write_start <= '1';
+                    iic_write_axi_write_addr  <= C_IIC_REG_IER;
+                    iic_write_axi_write_data  <= C_IIC_MASTER_TX_GENERAL_ERROR_MASK or C_IIC_REG_ISR_IER_BUS_NOT_BUSY_MASK;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_write_state <= C_IIC_WRITE_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_write_state_next <= C_IIC_WRITE_STATE_WAIT_FOR_NOT_BUSY_INTR;
                     
                 when C_IIC_WRITE_STATE_WAIT_FOR_NOT_BUSY_INTR =>
                     -- Wait for interrupt to occur and interrupt status to be read
@@ -1310,7 +1315,17 @@ begin
                     
                     -- Immediately transition to generate STOP condition
                     iic_read_state <= C_IIC_READ_STATE_TOGGLE_ISR;
-                    iic_read_state_next <= C_IIC_READ_STATE_WRITE_CR_STOP;
+                    iic_read_state_next <= C_IIC_READ_STATE_ENABLE_NOT_BUSY_INTR;
+                
+                when C_IIC_READ_STATE_ENABLE_NOT_BUSY_INTR =>
+                    iic_read_axi_write_start <= '1';
+                    iic_read_axi_write_addr  <= C_IIC_REG_IER;
+                    iic_read_axi_write_data  <= C_IIC_MASTER_RX_GENERAL_ERROR_MASK or 
+                                                C_IIC_REG_ISR_IER_BUS_NOT_BUSY_MASK;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_read_state_next <= C_IIC_READ_STATE_WRITE_CR_STOP; 
                 
                 when C_IIC_READ_STATE_WRITE_CR_STOP =>
                     iic_read_axi_write_start <= '1';
@@ -1319,8 +1334,19 @@ begin
                     
                     -- Immediately transition to wait for AXI transaction to complete, prepare next state
                     iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
-                    iic_read_state_next <= C_IIC_READ_STATE_READ_RX_FIFO_FINAL;
-                    
+                    iic_read_state_next <= C_IIC_READ_STATE_WAIT_FOR_NOT_BUSY_INTR;
+                
+                when C_IIC_READ_STATE_WAIT_FOR_NOT_BUSY_INTR =>
+                    -- Wait for interrupt to occur and interrupt status to be read
+                    if (iic_intr_state = C_INTR_STATE_WAITING_CLEAR) then
+                        -- Check for expected interrupt on BUS_NOT_BUSY
+                        if (unsigned(iic_intr_status_reg and C_IIC_REG_ISR_IER_BUS_NOT_BUSY_MASK) /= 0) then
+                            iic_read_state <= C_IIC_READ_STATE_DISABLE_CONTROLLER;
+                        else
+                            iic_read_state <= C_IIC_READ_STATE_ERROR;
+                        end if ;
+                    end if ;
+                
                 when C_IIC_READ_STATE_DISABLE_CONTROLLER =>
                     iic_read_axi_write_start <= '1';
                     iic_read_axi_write_addr  <= C_IIC_REG_CR;
@@ -1338,7 +1364,7 @@ begin
                     -- Immediately transition to wait for AXI transaction to complete, prepare next state
                     iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
                     iic_read_state_next <= C_IIC_READ_STATE_TRANSACTION_COMPLETE;
-                    
+                
                 when C_IIC_READ_STATE_TRANSACTION_COMPLETE =>
                     -- Wait for interrupt to clear and interrupt controller to return to idle
                     if (iic_intr_state = C_INTR_STATE_IDLE) then
@@ -1348,10 +1374,7 @@ begin
                 when C_IIC_READ_STATE_ERROR =>
                     -- Latch in error state to force IIC controller reset sequence
                     iic_read_error_flag <= '1';
-                    
-                when C_IIC_READ_STATE_HANG =>
-                    -- Latch in hang, do nothing
-                    
+                
                 when others =>
                     iic_read_state <= C_IIC_READ_STATE_ERROR;
                 end case ;
