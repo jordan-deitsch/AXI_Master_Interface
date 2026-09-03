@@ -41,6 +41,18 @@ package axi_iic_interface_defs is
         C_AXI_READ_STATE_READ_DATA
     );
     
+    type T_TX_BUFFER_LOAD_STATE is
+    (
+        C_BUFFER_STATE_RESET,
+        C_BUFFER_STATE_IDLE,
+        C_BUFFER_STATE_FLUSH_FIFO,
+        C_BUFFER_STATE_WAIT_FOR_WR_AK,
+        C_BUFFER_STATE_LOAD_SLAVE_ADDR,
+        C_BUFFER_STATE_LOAD_REGISTER_ADDR,
+        C_BUFFER_STATE_LOAD_WRITE_DATA_BYTE,
+        C_BUFFER_STATE_LOAD_COMPLETE
+    );
+    
     -- IIC Reset states
     type T_IIC_RESET_STATE is
     (
@@ -87,6 +99,7 @@ package axi_iic_interface_defs is
         C_IIC_WRITE_STATE_DISABLE_CONTROLLER,
         C_IIC_WRITE_STATE_DISABLE_ALL_INTR,
         C_IIC_WRITE_STATE_TRANSACTION_COMPLETE,
+        C_IIC_WRITE_STATE_LOAD_BUFFER,
         C_IIC_WRITE_STATE_ERROR
     );
     
@@ -125,20 +138,10 @@ package axi_iic_interface_defs is
         C_IIC_READ_STATE_DISABLE_CONTROLLER,
         C_IIC_READ_STATE_DISABLE_ALL_INTR,
         C_IIC_READ_STATE_TRANSACTION_COMPLETE,
+        C_IIC_READ_STATE_LOAD_BUFFER,
         C_IIC_READ_STATE_ERROR
     );
-    
-    type T_IIC_MODE is
-    (
-        C_IIC_MODE_RESET,
-        C_IIC_MODE_IDLE,
-        C_IIC_MODE_ERROR,
-        C_IIC_MODE_MASTER_TRANSMITTER,
-        C_IIC_MODE_MASTER_RECEIVER,
-        C_IIC_MODE_SLAVE_TRANSMITTER,
-        C_IIC_MODE_SLAVE_RECEIVER
-    );
-    
+   
     -- FIFO operation constants
     constant C_IIC_MIN_TX_WORDS : integer := 2;
     constant C_IIC_MIN_RX_WORDS : integer := 1;
@@ -171,8 +174,7 @@ package axi_iic_interface_defs is
     constant C_IIC_REG_ISR_IER_NOT_ADDR_AS_SLAVE_MASK   : std_logic_vector(31 downto 0) := X"0000_0040";
     constant C_IIC_REG_ISR_IER_TX_FIFO_HALF_EMPTY_MASK  : std_logic_vector(31 downto 0) := X"0000_0080";
     
-    constant C_IIC_MASTER_TX_GENERAL_ERROR_MASK         : std_logic_vector(31 downto 0) :=  C_IIC_REG_ISR_IER_ARB_LOST_MASK or 
-                                                                                            C_IIC_REG_ISR_IER_TX_ERROR_MASK;
+    constant C_IIC_MASTER_TX_GENERAL_ERROR_MASK         : std_logic_vector(31 downto 0) :=  C_IIC_REG_ISR_IER_ARB_LOST_MASK or C_IIC_REG_ISR_IER_TX_ERROR_MASK;
     constant C_IIC_MASTER_RX_GENERAL_ERROR_MASK         : std_logic_vector(31 downto 0) :=  C_IIC_REG_ISR_IER_ARB_LOST_MASK; 
     
     constant C_IIC_REG_CR_IIC_ENABLE_MASK       : std_logic_vector(31 downto 0) := X"0000_0001";

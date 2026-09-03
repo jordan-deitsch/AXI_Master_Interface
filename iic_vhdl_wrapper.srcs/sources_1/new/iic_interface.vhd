@@ -31,11 +31,25 @@ entity iic_interface is
     port ( 
         clk_i    : in std_logic;
         reset_i  : in std_logic;
+        
         scl_io   : inout std_logic;
         sda_io   : inout std_logic;
-        data_i   : in std_logic_vector (7 downto 0);
-        write_iic_i : in std_logic;
-        read_iic_i  : in std_logic
+        
+        bus_ready_o     : out std_logic;    -- 1 if bus is believed to be ready to send more data
+        tx_completed_o  : out std_logic;    -- 1 if transaction completed successfully
+        
+        wr_addr_i       : in std_logic_vector (7 downto 0);
+        wr_data_i       : in std_logic_vector (7 downto 0);     -- Data to write to Bridge Chip (don't care for read operation)
+        rd_addr_i       : in std_logic_vector (7 downto 0);
+        rd_data_o       : out std_logic_vector (7 downto 0);    -- Data Read from Bridge Chip (don't care for write operation)
+        
+        is_write_i          : in std_logic; -- 1: write operation, 0: read operation
+        start_transaction_i : in std_logic;
+        rd_data_valid_o     : out std_logic;
+        
+        -- Debug signals
+        axi_write_i : in std_logic;
+        axi_read_i  : in std_logic
     );
 end iic_interface;
 
@@ -95,6 +109,8 @@ architecture rtl of iic_interface is
     signal axi_read_timeout_counter     : unsigned (31 downto 0);
     
     constant C_AXI_TIMEOUT_VALUE        : unsigned (31 downto 0) := to_unsigned(16#64#, 32);
+    constant C_STATE_RISING             : std_logic_vector (1 downto 0) := "01";
+    constant C_STATE_FALLING            : std_logic_vector (1 downto 0) := "10";
     -- AXI SIGNALS: DO NOT TOUCH
     
     -- IIC bus signals
@@ -103,19 +119,24 @@ architecture rtl of iic_interface is
     signal scl_t : std_logic; 
     signal sda_i : std_logic; 
     signal sda_o : std_logic; 
-    signal sda_t : std_logic; 
-    signal iic_intr : std_logic;
+    signal sda_t : std_logic;
+     
+    signal iic_intr     : std_logic;
     signal iic_read_reg : std_logic_vector (31 downto 0);
     signal iic_write_slave_addr : std_logic_vector (7 downto 0);
     signal iic_read_slave_addr  : std_logic_vector (7 downto 0);
     
+    signal bus_ready_buf : std_logic;
+    signal tx_completed_buf : std_logic;
+    
     -- IIC write control signals
-    signal iic_write_state      : T_IIC_WRITE_STATE;
-    signal iic_write_state_next : T_IIC_WRITE_STATE;
-    signal iic_write_state_ila  : std_logic_vector (7 downto 0);
-    signal iic_write_error_flag : std_logic;
-    signal iic_write_tx_fifo_rd_en : std_logic;
-    signal iic_write_start      : std_logic;
+    signal iic_write_state          : T_IIC_WRITE_STATE;
+    signal iic_write_state_next     : T_IIC_WRITE_STATE;
+    signal iic_write_state_ila      : std_logic_vector (7 downto 0);
+    signal iic_write_error_flag     : std_logic;
+    signal iic_write_tx_fifo_rd_en  : std_logic;
+    signal iic_write_start          : std_logic;
+    signal iic_write_load_buffer    : std_logic;
     
     signal iic_write_axi_write_start    : std_logic;
     signal iic_write_axi_read_start     : std_logic;
@@ -124,12 +145,13 @@ architecture rtl of iic_interface is
     signal iic_write_axi_write_data     : std_logic_vector (31 downto 0);
     
     -- IIC read control signals
-    signal iic_read_state       : T_IIC_READ_STATE;
-    signal iic_read_state_next  : T_IIC_READ_STATE;
-    signal iic_read_state_ila   : std_logic_vector (7 downto 0);
-    signal iic_read_error_flag  : std_logic;
-    signal iic_read_tx_fifo_rd_en : std_logic;
-    signal iic_read_start       : std_logic;
+    signal iic_read_state           : T_IIC_READ_STATE;
+    signal iic_read_state_next      : T_IIC_READ_STATE;
+    signal iic_read_state_ila       : std_logic_vector (7 downto 0);
+    signal iic_read_error_flag      : std_logic;
+    signal iic_read_tx_fifo_rd_en   : std_logic;
+    signal iic_read_start           : std_logic;
+    signal iic_read_load_buffer     : std_logic;
     
     signal iic_read_axi_write_start : std_logic;
     signal iic_read_axi_read_start  : std_logic;
@@ -163,33 +185,33 @@ architecture rtl of iic_interface is
     signal iic_intr_axi_read_addr   : std_logic_vector (8 downto 0);
     signal iic_intr_axi_write_data  : std_logic_vector (31 downto 0);
     
+    -- TX_FIFO Buffer handler 
+    signal buffer_state         : T_TX_BUFFER_LOAD_STATE;
+    signal buffer_state_next    : T_TX_BUFFER_LOAD_STATE;
+    signal buffer_state_ila     : std_logic_vector (7 downto 0);
+    signal buffer_wr_en : std_logic;
+    signal buffer_din   : std_logic_vector (7 downto 0);
+    
     -- VIO AXI control signals
-    signal vio_axi_write_start  : std_logic;
-    signal vio_axi_read_start   : std_logic;
     signal vio_axi_write_addr   : std_logic_vector (8 downto 0);
     signal vio_axi_read_addr    : std_logic_vector (8 downto 0);
     signal vio_axi_write_data   : std_logic_vector (31 downto 0);
     
-    signal vio_iic_write_start      : std_logic;
-    signal vio_iic_write_start_pipe : std_logic_vector (1 downto 0);
-    
-    signal vio_iic_read_start       : std_logic;
-    signal vio_iic_read_start_pipe  : std_logic_vector (1 downto 0);
-    
-    signal vio_tx_fifo_input        : std_logic_vector (7 downto 0);
+    signal vio_tx_fifo_din          : std_logic_vector (7 downto 0);
     signal vio_tx_fifo_wr_en        : std_logic;
-    signal vio_tx_fifo_rd_en        : std_logic;
+    signal vio_tx_fifo_wr_en_pulse  : std_logic;
     signal vio_tx_fifo_wr_en_pipe   : std_logic_vector (1 downto 0);
-    signal vio_tx_fifo_rd_en_pipe   : std_logic_vector (1 downto 0);
-    
     signal vio_rx_fifo_rd_en        : std_logic;
+    signal vio_rx_fifo_rd_en_pulse  : std_logic;
     signal vio_rx_fifo_rd_en_pipe   : std_logic_vector (1 downto 0);
     
     signal vio_iic_read_number      : std_logic_vector (3 downto 0);
+    signal vio_iic_select           : std_logic;
     
     -- TX FIFO signals (data being written to AXI-IIC for TX to slave device)
     signal tx_fifo_reset        : std_logic;
     signal tx_fifo_full         : std_logic;
+    signal tx_fifo_din          : std_logic_vector (7 downto 0);
     signal tx_fifo_dout         : std_logic_vector (7 downto 0);
     signal tx_fifo_empty        : std_logic;
     signal tx_fifo_wr_en        : std_logic;
@@ -231,6 +253,17 @@ begin
         X"2" when C_AXI_READ_STATE_READ_ADDRESS,
         X"3" when C_AXI_READ_STATE_READ_DATA;
         
+    with buffer_state select
+    buffer_state_ila <=
+        X"00" when C_BUFFER_STATE_RESET,
+        X"01" when C_BUFFER_STATE_IDLE,
+        X"02" when C_BUFFER_STATE_FLUSH_FIFO,
+        X"03" when C_BUFFER_STATE_WAIT_FOR_WR_AK,
+        X"04" when C_BUFFER_STATE_LOAD_SLAVE_ADDR,
+        X"05" when C_BUFFER_STATE_LOAD_REGISTER_ADDR,
+        X"06" when C_BUFFER_STATE_LOAD_WRITE_DATA_BYTE,
+        X"07" when C_BUFFER_STATE_LOAD_COMPLETE;
+    
     with iic_intr_state select
     iic_intr_state_ila <=
         X"00" when C_INTR_STATE_RESET,
@@ -272,6 +305,7 @@ begin
         X"10" when C_IIC_WRITE_STATE_DISABLE_CONTROLLER,
         X"11" when C_IIC_WRITE_STATE_DISABLE_ALL_INTR,
         X"12" when C_IIC_WRITE_STATE_TRANSACTION_COMPLETE,
+        X"AA" when C_IIC_WRITE_STATE_LOAD_BUFFER,
         X"FF" when C_IIC_WRITE_STATE_ERROR;
         
     with iic_read_state select
@@ -308,6 +342,7 @@ begin
         X"1D" when C_IIC_READ_STATE_DISABLE_CONTROLLER,
         X"1E" when C_IIC_READ_STATE_DISABLE_ALL_INTR,
         X"1F" when C_IIC_READ_STATE_TRANSACTION_COMPLETE,
+        X"AA" when C_IIC_READ_STATE_LOAD_BUFFER,
         X"FF" when C_IIC_READ_STATE_ERROR;
     
     scl_iobuf : IOBUF
@@ -372,14 +407,12 @@ begin
             probe35 => std_logic_vector'(0 => tx_fifo_overflow),
             probe36 => std_logic_vector'(0 => tx_fifo_underflow),
             
-            probe37 => iic_write_state_ila,
-            probe38 => std_logic_vector'(0 => iic_write_start),
-            
-            probe39 => iic_reset_state_ila,
-            probe40 => std_logic_vector'(0 => iic_reset_seq_active),
-            
-            probe41 => iic_read_state_ila,
-            probe42 => std_logic_vector'(0 => iic_read_start),
+            probe37 => std_logic_vector'(0 => iic_reset_seq_active),
+            probe38 => std_logic_vector'(0 => bus_ready_buf),
+            probe39 => std_logic_vector'(0 => tx_completed_buf),
+            probe40 => iic_reset_state_ila,
+            probe41 => iic_write_state_ila,
+            probe42 => iic_read_state_ila,
             
             probe43 => rx_fifo_dout,
             probe44 => rx_fifo_data_count,
@@ -393,22 +426,24 @@ begin
             
             probe52 => std_logic_vector'(0 => iic_intr_error_flag),
             probe53 => std_logic_vector'(0 => iic_write_error_flag),
-            probe54 => std_logic_vector'(0 => iic_read_error_flag)     
+            probe54 => std_logic_vector'(0 => iic_read_error_flag),
+            
+            probe55 => std_logic_vector'(0 => start_transaction_i),  
+            probe56 => std_logic_vector'(0 => tx_fifo_wr_en),
+            probe57 => buffer_state_ila   
         );
         
-    vio_inst : entity work.vio_0
+    vio_iic_inst : entity work.vio_0
         port map(
             clk             => clk_i,
             probe_out0      => vio_axi_write_addr,
             probe_out1      => vio_axi_read_addr,
             probe_out2      => vio_axi_write_data,
-            probe_out3      => vio_tx_fifo_input,
+            probe_out3      => vio_tx_fifo_din,
             probe_out4(0)   => vio_tx_fifo_wr_en,
-            probe_out5(0)   => vio_tx_fifo_rd_en,
-            probe_out6(0)   => vio_rx_fifo_rd_en,
-            probe_out7(0)   => vio_iic_write_start,
-            probe_out8(0)   => vio_iic_read_start,
-            probe_out9      => vio_iic_read_number
+            probe_out5(0)   => vio_rx_fifo_rd_en,
+            probe_out6      => vio_iic_read_number,
+            probe_out7(0)   => vio_iic_select
         );
     
     axi_iic_inst : entity work.iic_0
@@ -459,7 +494,7 @@ begin
             clk     => clk_i,
             srst    => reset_i or tx_fifo_reset,
             
-            din     => vio_tx_fifo_input,
+            din     => tx_fifo_din,
             full    => tx_fifo_full,
             wr_en   => tx_fifo_wr_en,
             
@@ -494,152 +529,215 @@ begin
             data_count  => rx_fifo_data_count
         );
     
-    -- MUX to select driver process of AXI read and write start pulses, address, and data
+    bus_ready_o <= bus_ready_buf;
+    tx_completed_o <= tx_completed_buf;
+    
     process (clk_i, reset_i) begin
         if (reset_i = '1') then
-            axi_write_addr_buf <= (others => '0');
-            axi_write_data_buf <= (others => '0');
+            bus_ready_buf <= '0';
+            tx_completed_buf <= '0';
+        
+        elsif rising_edge(clk_i) then
+            
+            -- Assign bus_ready_o if both write and read in idle
+            if (iic_write_state = C_IIC_WRITE_STATE_IDLE and iic_read_state = C_IIC_READ_STATE_IDLE) then
+                bus_ready_buf <= '1';
+            else
+                bus_ready_buf <= '0';
+            end if ;
+            
+            -- Pulse tx_completed if either write or read completes
+            tx_completed_buf <= '0';
+            if (iic_write_state = C_IIC_WRITE_STATE_TRANSACTION_COMPLETE or iic_read_state = C_IIC_READ_STATE_TRANSACTION_COMPLETE) then
+                tx_completed_buf <= '1';
+            end if ;
+            
+        end if ;
+        
+    end process ;
+    
+    -- MUX to select driver process of AXI read and write access
+    process (clk_i, reset_i) begin
+        if (reset_i = '1') then
+            axi_write_addr_buf  <= (others => '0');
+            axi_write_data_buf  <= (others => '0');
+            axi_read_addr_buf   <= (others => '0');
+            
             axi_write_start <= '0';
-            axi_read_start <= '0';
-            tx_fifo_rd_en <= '0';
+            axi_read_start  <= '0';
+            tx_fifo_wr_en   <= '0';
+            tx_fifo_rd_en   <= '0';
             
         elsif rising_edge(clk_i) then
-        
+            
+            -- Set variables that can be pulsed in state machines
             axi_write_start <= '0';
-            axi_read_start <= '0';
-            tx_fifo_rd_en <= '0';
+            axi_read_start  <= '0';
             
             -- Priority of AXI write start pulses
-            if (iic_reset_axi_write_start = '1') then
-                axi_write_start <= '1';
-                axi_write_addr_buf <= iic_reset_axi_write_addr;
-                axi_write_data_buf <= iic_reset_axi_write_data;
-                
-            elsif (iic_intr_axi_write_start = '1') then
-                axi_write_start <= '1';
-                axi_write_addr_buf <= iic_intr_axi_write_addr;
-                axi_write_data_buf <= iic_intr_axi_write_data;
-                
-            elsif (iic_write_axi_write_start = '1') then
-                axi_write_start <= '1';
-                axi_write_addr_buf <= iic_write_axi_write_addr;
-                axi_write_data_buf <= iic_write_axi_write_data;
-                
-            elsif (iic_read_axi_write_start = '1') then
-                axi_write_start <= '1';
-                axi_write_addr_buf <= iic_read_axi_write_addr;
-                axi_write_data_buf <= iic_read_axi_write_data;
-                
-            elsif (vio_axi_write_start = '1') then
-                axi_write_start <= '1';
-                axi_write_addr_buf <= vio_axi_write_addr;
-                axi_write_data_buf <= vio_axi_write_data;
-                
-            -- Add new write sources here
+            if (axi_write_busy = '0') then
+                if (iic_reset_axi_write_start = '1') then
+                    axi_write_start <= '1';
+                    axi_write_addr_buf <= iic_reset_axi_write_addr;
+                    axi_write_data_buf <= iic_reset_axi_write_data;
+                    
+                elsif (iic_intr_axi_write_start = '1') then
+                    axi_write_start <= '1';
+                    axi_write_addr_buf <= iic_intr_axi_write_addr;
+                    axi_write_data_buf <= iic_intr_axi_write_data;
+                    
+                elsif (iic_write_axi_write_start = '1') then
+                    axi_write_start <= '1';
+                    axi_write_addr_buf <= iic_write_axi_write_addr;
+                    axi_write_data_buf <= iic_write_axi_write_data;
+                    
+                elsif (iic_read_axi_write_start = '1') then
+                    axi_write_start <= '1';
+                    axi_write_addr_buf <= iic_read_axi_write_addr;
+                    axi_write_data_buf <= iic_read_axi_write_data;
+                    
+                elsif (axi_write_i = '1') then
+                    axi_write_start <= '1';
+                    axi_write_addr_buf <= vio_axi_write_addr;
+                    axi_write_data_buf <= vio_axi_write_data;
+                    
+                -- Add new write sources here
+                end if ;
             end if ;
             
             -- Priority of AXI read start pulses
-            if (iic_reset_axi_read_start = '1') then
-                axi_read_start <= '1';
-                axi_read_addr_buf <= iic_reset_axi_read_addr;
-                
-            elsif (iic_intr_axi_read_start = '1') then
-                axi_read_start <= '1';
-                axi_read_addr_buf <= iic_intr_axi_read_addr;
-                
-            elsif (iic_write_axi_read_start = '1') then
-                axi_read_start <= '1';
-                axi_read_addr_buf <= iic_write_axi_read_addr;
-                
-            elsif (iic_read_axi_read_start = '1') then
-                axi_read_start <= '1';
-                axi_read_addr_buf <= iic_read_axi_read_addr;
-            
-            elsif (vio_axi_read_start = '1') then
-                axi_read_start <= '1';
-                axi_read_addr_buf <= vio_axi_read_addr;
-                
-            -- Add new read sources here
+            if (axi_read_busy = '0') then               
+                if (iic_reset_axi_read_start = '1') then
+                    axi_read_start <= '1';
+                    axi_read_addr_buf <= iic_reset_axi_read_addr;
+                    
+                elsif (iic_intr_axi_read_start = '1') then
+                    axi_read_start <= '1';
+                    axi_read_addr_buf <= iic_intr_axi_read_addr;
+                    
+                elsif (iic_write_axi_read_start = '1') then
+                    axi_read_start <= '1';
+                    axi_read_addr_buf <= iic_write_axi_read_addr;
+                    
+                elsif (iic_read_axi_read_start = '1') then
+                    axi_read_start <= '1';
+                    axi_read_addr_buf <= iic_read_axi_read_addr;
+                    
+                elsif (axi_read_i = '1') then
+                    axi_read_start <= '1';
+                    axi_read_addr_buf <= vio_axi_read_addr;
+                    
+                -- Add new read sources here
+                end if ;
             end if ;
             
-            -- Priority of FIFO read pulses
-            if (iic_write_tx_fifo_rd_en = '1') then
-                tx_fifo_rd_en <= '1';
-            elsif (iic_read_tx_fifo_rd_en = '1') then
-                tx_fifo_rd_en <= '1';
-            elsif (vio_tx_fifo_rd_en_pipe(1) = '0' and vio_tx_fifo_rd_en_pipe(0) = '1') then
-                tx_fifo_rd_en <= '1';
+            -- Assign tx_fifo_wr_en
+            tx_fifo_wr_en <= buffer_wr_en or vio_tx_fifo_wr_en_pulse;
+            if (buffer_wr_en = '1') then
+                tx_fifo_din <= buffer_din;
+            elsif (vio_tx_fifo_wr_en_pulse = '1') then
+                tx_fifo_din <= vio_tx_fifo_din;
             end if ;
-           
+            
+            -- Assign tx_fifo_rd_en
+            tx_fifo_rd_en <= iic_write_tx_fifo_rd_en or iic_read_tx_fifo_rd_en;
+            
         end if ;
     end process ;
     
-    -- State machine to initiate AXI-IIC transaction from VIO and button
+    -- Process to load TX_FIFO buffer from VIO
     process (clk_i, reset_i) begin
         if (reset_i = '1') then
-            vio_axi_write_start <= '0';
-            vio_axi_read_start <= '0';
+            vio_tx_fifo_wr_en_pulse <= '0';
+            vio_rx_fifo_rd_en_pulse <= '0';
             
-            tx_fifo_wr_en <= '0';
             vio_tx_fifo_wr_en_pipe <= (others => '0');
-            vio_tx_fifo_rd_en_pipe <= (others => '0');
-            
-            rx_fifo_rd_en <= '0';
             vio_rx_fifo_rd_en_pipe <= (others => '0');
-            
-            iic_write_start <= '0';
-            iic_read_start  <= '0';
-            vio_iic_write_start_pipe    <= (others => '0');
-            vio_iic_read_start_pipe     <= (others => '0');
                         
         elsif rising_edge(clk_i) then
-            
-            vio_axi_write_start <= '0';
-            vio_axi_read_start <= '0';
-            
-            tx_fifo_wr_en <= '0';
             vio_tx_fifo_wr_en_pipe(0) <= vio_tx_fifo_wr_en;
             vio_tx_fifo_wr_en_pipe(1) <= vio_tx_fifo_wr_en_pipe(0);
-            
-            vio_tx_fifo_rd_en_pipe(0) <= vio_tx_fifo_rd_en;
-            vio_tx_fifo_rd_en_pipe(1) <= vio_tx_fifo_rd_en_pipe(0);
-            
-            rx_fifo_rd_en <= '0';
+
             vio_rx_fifo_rd_en_pipe(0) <= vio_rx_fifo_rd_en;
             vio_rx_fifo_rd_en_pipe(1) <= vio_rx_fifo_rd_en_pipe(0);
             
-            iic_write_start <= '0';
-            vio_iic_write_start_pipe(0) <= vio_iic_write_start;
-            vio_iic_write_start_pipe(1) <= vio_iic_write_start_pipe(0);
-            
-            iic_read_start <= '0';
-            vio_iic_read_start_pipe(0) <= vio_iic_read_start;
-            vio_iic_read_start_pipe(1) <= vio_iic_read_start_pipe(0);
-            
-            if (write_iic_i = '1' and axi_write_busy <= '0') then
-                vio_axi_write_start <= '1'; -- Pulse to start write
+            vio_tx_fifo_wr_en_pulse <= '0';
+            if (vio_tx_fifo_wr_en_pipe = C_STATE_RISING) then
+                vio_tx_fifo_wr_en_pulse <= '1';
             end if ;
             
-            if (read_iic_i = '1' and axi_read_busy <= '0') then
-                vio_axi_read_start <= '1'; -- Pulse to start read
+            vio_rx_fifo_rd_en_pulse <= '0';
+            if (vio_rx_fifo_rd_en_pipe = C_STATE_RISING) then
+                vio_rx_fifo_rd_en_pulse <= '1';
             end if ;
             
-            if (vio_tx_fifo_wr_en_pipe(1) = '0' and vio_tx_fifo_wr_en_pipe(0) = '1') then
-                tx_fifo_wr_en <= '1';
-            end if ;
+        end if ;
+    end process ;
+    
+    -- Process to load TX_FIFO buffer with data for write or read transaction
+    process (clk_i, reset_i) begin
+        if (reset_i = '1') then
+            buffer_wr_en    <= '0';
+            buffer_din      <= (others => '0');
             
-            if (vio_rx_fifo_rd_en_pipe(1) = '0' and vio_rx_fifo_rd_en_pipe(0) = '1') then
-                rx_fifo_rd_en <= '1';
-            end if ;
+            buffer_state        <= C_BUFFER_STATE_RESET;
+            buffer_state_next   <= C_BUFFER_STATE_RESET;
             
-            if (vio_iic_write_start_pipe(1) = '0' and vio_iic_write_start_pipe(0) = '1') then
-                iic_write_start <= '1';
-            end if ;
+        elsif rising_edge(clk_i) then
             
-            if (vio_iic_read_start_pipe(1) = '0' and vio_iic_read_start_pipe(0) = '1') then
-                iic_read_start <= '1';
-            end if ;
+            buffer_wr_en <= '0';
             
+            case buffer_state is
+            when C_BUFFER_STATE_RESET =>
+                buffer_din      <= (others => '0');
+                buffer_state    <= C_BUFFER_STATE_IDLE;
+            
+            when C_BUFFER_STATE_IDLE =>
+                buffer_din <= (others => '0');
+                
+                if (iic_write_load_buffer = '1' or iic_read_load_buffer = '1') then
+                    buffer_state <= C_BUFFER_STATE_LOAD_SLAVE_ADDR;
+                end if ;
+                
+            when C_BUFFER_STATE_WAIT_FOR_WR_AK =>
+                if (tx_fifo_wr_ack = '1') then
+                    buffer_state <= buffer_state_next;
+                end if ;
+            
+            when C_BUFFER_STATE_FLUSH_FIFO =>
+                -- Add logic to flush TX_FIFO buffer as needed
+            
+            when C_BUFFER_STATE_LOAD_SLAVE_ADDR =>
+                buffer_wr_en <= '1';
+                buffer_din <= C_IIC_SLAVE_7_BIT_ADDR_SX1509 & '0';
+                buffer_state <= C_BUFFER_STATE_WAIT_FOR_WR_AK;
+                buffer_state_next <= C_BUFFER_STATE_LOAD_REGISTER_ADDR;
+                
+            when C_BUFFER_STATE_LOAD_REGISTER_ADDR =>
+                buffer_wr_en <= '1';
+                if (is_write_i = '1') then
+                    buffer_din <= wr_addr_i;
+                    buffer_state <= C_BUFFER_STATE_WAIT_FOR_WR_AK;
+                    buffer_state_next <= C_BUFFER_STATE_LOAD_WRITE_DATA_BYTE;
+                else
+                    buffer_din <= rd_addr_i;
+                    buffer_state <= C_BUFFER_STATE_WAIT_FOR_WR_AK;
+                    buffer_state_next <= C_BUFFER_STATE_LOAD_COMPLETE;
+                end if ;
+                
+            when C_BUFFER_STATE_LOAD_WRITE_DATA_BYTE =>
+                buffer_wr_en <= '1';
+                buffer_din <= wr_data_i;
+                buffer_state <= C_BUFFER_STATE_WAIT_FOR_WR_AK;
+                buffer_state_next <= C_BUFFER_STATE_LOAD_COMPLETE;    
+            
+            when C_BUFFER_STATE_LOAD_COMPLETE =>
+                buffer_state <= C_BUFFER_STATE_IDLE;
+                
+            when others =>
+                buffer_state <= C_BUFFER_STATE_RESET;
+            end case ;
+        
         end if ;
     end process ;
     
@@ -820,12 +918,13 @@ begin
     -- Process to perform IIC write transaction
     process (clk_i, reset_i) begin
         if (reset_i = '1') then
-            iic_write_axi_write_start <= '0';
             iic_write_axi_write_addr  <= (others => '0');
             iic_write_axi_write_data  <= (others => '0');
             
-            iic_write_tx_fifo_rd_en <= '0';
-            iic_write_error_flag    <= '0';
+            iic_write_axi_write_start   <= '0';
+            iic_write_tx_fifo_rd_en     <= '0';
+            iic_write_load_buffer       <= '0';
+            iic_write_error_flag        <= '0';
             
             iic_write_state <= C_IIC_WRITE_STATE_RESET;
             iic_write_state_next <= C_IIC_WRITE_STATE_RESET;
@@ -833,8 +932,9 @@ begin
         elsif rising_edge(clk_i) then
             
             -- Initialize signals that can be pulsed in a state
-            iic_write_axi_write_start <= '0';
-            iic_write_tx_fifo_rd_en <= '0';
+            iic_write_axi_write_start   <= '0';
+            iic_write_tx_fifo_rd_en     <= '0';
+            iic_write_load_buffer       <= '0';
             
             -- Hold in reset until reset sequence is complete
             if (iic_reset_seq_active = '1') then
@@ -851,13 +951,24 @@ begin
                     
                 when C_IIC_WRITE_STATE_IDLE =>
                     -- Wait for external signal to start write sequence
-                    if (iic_write_start = '1') then
+                    if (start_transaction_i = '1' and is_write_i = '1') then
+                        -- Check if usign data from VIO or input port
+                        if (vio_iic_select = '0') then
+                            iic_write_load_buffer <= '1';
+                            iic_write_state <= C_IIC_WRITE_STATE_LOAD_BUFFER;
+                        
                         -- Check for min number of words for transmit (IIC slave device address and 1 data word minimum)
-                        if (unsigned(tx_fifo_data_count) < C_IIC_MIN_TX_WORDS) then
+                        elsif (unsigned(tx_fifo_data_count) < C_IIC_MIN_TX_WORDS) then
                             iic_write_state <= C_IIC_WRITE_STATE_ERROR;
+                        
                         else
                             iic_write_state <= C_IIC_WRITE_STATE_FLUSH_TX_FIFO;
                         end if ;
+                    end if ;
+                    
+                when C_IIC_WRITE_STATE_LOAD_BUFFER =>
+                    if (buffer_state = C_BUFFER_STATE_LOAD_COMPLETE) then
+                        iic_write_state <= C_IIC_WRITE_STATE_FLUSH_TX_FIFO;
                     end if ;
                     
                 when C_IIC_WRITE_STATE_WAIT_FOR_AXI_WRITE =>
@@ -1054,15 +1165,17 @@ begin
     -- Process to perform IIC read transaction
     process (clk_i, reset_i) begin
         if (reset_i = '1') then
-            iic_read_axi_write_start <= '0';
-            iic_read_axi_read_start  <= '0';
+            
             iic_read_axi_write_addr  <= (others => '0');
             iic_read_axi_write_data  <= (others => '0');
             iic_read_axi_read_addr   <= (others => '0');
             
-            iic_read_tx_fifo_rd_en  <= '0';
-            rx_fifo_wr_en           <= '0';
-            iic_read_error_flag     <= '0';
+            iic_read_axi_write_start    <= '0';
+            iic_read_axi_read_start     <= '0';
+            iic_read_load_buffer        <= '0';
+            iic_read_tx_fifo_rd_en      <= '0';
+            rx_fifo_wr_en               <= '0';
+            iic_read_error_flag         <= '0';
             
             iic_read_state <= C_IIC_READ_STATE_RESET;
             iic_read_state_next <= C_IIC_READ_STATE_RESET;
@@ -1070,10 +1183,11 @@ begin
         elsif rising_edge(clk_i) then
             
             -- Initialize signals that can be pulsed in a state
-            iic_read_axi_write_start <= '0';
-            iic_read_axi_read_start <= '0';
-            iic_read_tx_fifo_rd_en  <= '0';
-            rx_fifo_wr_en <= '0';
+            iic_read_axi_write_start    <= '0';
+            iic_read_axi_read_start     <= '0';
+            iic_read_load_buffer        <= '0';
+            iic_read_tx_fifo_rd_en      <= '0';
+            rx_fifo_wr_en               <= '0';
             
             -- Hold in reset until reset sequence is complete
             if (iic_reset_seq_active = '1') then
@@ -1090,16 +1204,27 @@ begin
                     
                 when C_IIC_READ_STATE_IDLE =>
                     -- Wait for external signal to start read sequence
-                    if (iic_read_start = '1') then
+                    if (start_transaction_i = '1' and is_write_i = '0') then
+                        -- Check if using data from VIO or input port
+                        if (vio_iic_select = '0') then
+                            iic_read_load_buffer <= '1';
+                            iic_read_state <= C_IIC_READ_STATE_LOAD_BUFFER;
+                            
                         -- Check for min number of words for transmit and receive
-                        if (unsigned(tx_fifo_data_count) < C_IIC_MIN_TX_WORDS or 
-                            unsigned(vio_iic_read_number) < C_IIC_MIN_RX_WORDS) then
+                        elsif ( unsigned(tx_fifo_data_count) < C_IIC_MIN_TX_WORDS or 
+                                unsigned(vio_iic_read_number) < C_IIC_MIN_RX_WORDS) then
                             iic_read_state <= C_IIC_READ_STATE_ERROR;
+                        
                         else
                             iic_read_state <= C_IIC_READ_STATE_FLUSH_TX_FIFO;
                         end if ;
                     end if ;
-                    
+
+                when C_IIC_READ_STATE_LOAD_BUFFER =>
+                    if (buffer_state = C_BUFFER_STATE_LOAD_COMPLETE) then
+                        iic_read_state <= C_IIC_READ_STATE_FLUSH_TX_FIFO;
+                    end if ;
+                
                 when C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE =>
                     -- Wait for write to finish, then transition to next state
                     if (axi_write_done = '1') then

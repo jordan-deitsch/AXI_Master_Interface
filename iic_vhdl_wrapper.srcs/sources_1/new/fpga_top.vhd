@@ -55,18 +55,23 @@ architecture rtl of fpga_top is
     signal clk      : std_logic;
     signal reset    : std_logic := '0';
     
+    -- Pulsed signals tied to button inputs
     signal button_0_pipe  : std_logic_vector (1 downto 0);
     signal button_1_pipe  : std_logic_vector (1 downto 0);
     signal button_2_pipe  : std_logic_vector (1 downto 0);
     signal button_3_pipe  : std_logic_vector (1 downto 0);
     
-    signal data_to_iic          : std_logic_vector (7 downto 0);
+    signal button_0_pulse   : std_logic;
+    signal button_1_pulse   : std_logic;
+    signal button_2_pulse   : std_logic;
+    signal button_3_pulse   : std_logic;
+    
     signal data_to_gpio         : std_logic_vector (3 downto 0);
     
-    signal write_to_iic     : std_logic;
-    signal read_from_iic    : std_logic;
-    signal write_to_gpio    : std_logic;
-    signal read_from_gpio   : std_logic;
+    signal vio_wr_addr  : std_logic_vector (7 downto 0);
+    signal vio_rd_addr  : std_logic_vector (7 downto 0);
+    signal vio_wr_data  : std_logic_vector (7 downto 0);
+    signal vio_is_write : std_logic;
     
     constant CLK_DIVIDE_RATIO   : integer := 50000000;  -- For 100MHz clk, divide rate = 50_000_000
     signal led_heartbeat_reg    : unsigned(31 downto 0) := (others => '0');
@@ -80,7 +85,6 @@ architecture rtl of fpga_top is
 begin
 
     reset           <= not (reset_n_i);
-    data_to_iic     <= sw_i & btn_i;
     data_to_gpio    <= sw_i;
     
     led0_r_o            <= led_heartbeat_buf;
@@ -93,15 +97,31 @@ begin
             clk_100M    => clk        
         );
         
+    vio_top_inst : entity work.vio_1
+        port map(
+            clk             => clk,
+            probe_out0      => vio_wr_addr,
+            probe_out1      => vio_rd_addr,
+            probe_out2      => vio_wr_data,
+            probe_out3(0)   => vio_is_write
+        );
+    
     iic_interface_inst : entity work.iic_interface
         port map (
             clk_i           => clk,
             reset_i         => reset,
             scl_io          => iic_scl_io,
             sda_io          => iic_sda_io,
-            data_i          => data_to_iic,
-            write_iic_i     => write_to_iic,
-            read_iic_i      => read_from_iic
+            
+            wr_addr_i   => vio_wr_addr,
+            wr_data_i   => vio_wr_data,
+            rd_addr_i   => vio_rd_addr,
+            
+            is_write_i  => vio_is_write,
+            start_transaction_i =>  button_3_pulse,   
+            
+            axi_write_i => button_0_pulse,
+            axi_read_i  => button_1_pulse
         );
         
     gpio_interface_inst : entity work.gpio_interface
@@ -109,10 +129,10 @@ begin
             clk_i           => clk,
             reset_i         => reset,
             gpio_o          => gpio_out_buff,
-            gpio_i          => sw_i,    -- TEST: route switch signals to GPIO inputs
+            gpio_i          => sw_i,
             data_i          => data_to_gpio,
-            write_gpio_i    => write_to_gpio,
-            read_gpio_i     => read_from_gpio
+            write_gpio_i    => button_2_pulse,
+            read_gpio_i     => '0'
         );
         
     -- Pipeline button inputs for edge detection
@@ -139,40 +159,36 @@ begin
         end if ;
     end process ;
     
-    -- Create pulse on data_to_iic_valid on btn(0) press
+    -- Create pulse for each button press
     process (clk, reset) begin
         if (reset = '1') then
-            write_to_iic    <= '0';
-            read_from_iic   <= '0';
-            write_to_gpio   <= '0';
-            read_from_gpio  <= '0';
+            button_0_pulse  <= '0';
+            button_1_pulse  <= '0';
+            button_2_pulse  <= '0';
+            button_3_pulse  <= '0';
             
         elsif (rising_edge(clk)) then
             
             -- Create single clock pulses 
-            write_to_iic    <= '0';
-            read_from_iic   <= '0';
-            write_to_gpio   <= '0';
-            read_from_gpio  <= '0';
+            button_0_pulse  <= '0';
+            button_1_pulse  <= '0';
+            button_2_pulse  <= '0';
+            button_3_pulse  <= '0';
             
-            -- Send data into IIC controller 
             if (button_0_pipe = C_STATE_RISING) then
-                write_to_iic <= '1';
+                button_0_pulse  <= '1';
             end if ;
             
-            -- Send data into GPIO controller 
             if (button_1_pipe = C_STATE_RISING) then
-                read_from_iic <= '1';
+                button_1_pulse  <= '1';
             end if ;
             
-            -- Read data from GPIO controller 
             if (button_2_pipe = C_STATE_RISING) then
-                write_to_gpio <= '1';
+                button_2_pulse  <= '1';
             end if ;
             
-            -- Read data from GPIO controller 
             if (button_3_pipe = C_STATE_RISING) then
-                read_from_gpio <= '1';
+                button_3_pulse  <= '1';
             end if ;
             
         end if ;
