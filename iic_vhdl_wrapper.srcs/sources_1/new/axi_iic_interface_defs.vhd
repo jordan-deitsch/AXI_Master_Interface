@@ -75,7 +75,8 @@ package axi_iic_interface_defs is
         C_IIC_WRITE_STATE_FLUSH_TX_FIFO,
         C_IIC_WRITE_STATE_NORMAL_TX_FIFO,
         C_IIC_WRITE_STATE_ENABLE_TX_FIFO_EMPTY_INTR,
-        C_IIC_WRITE_STATE_WRITE_TX_FIFO,
+        C_IIC_WRITE_STATE_WRITE_TX_FIFO_SLAVE_ADDR,
+        C_IIC_WRITE_STATE_WRITE_TX_FIFO_DATA,
         C_IIC_WRITE_STATE_START_TX,
         C_IIC_WRITE_STATE_WAIT_FOR_TX_FIFO_EMPTY_INTR,
         C_IIC_WRITE_STATE_SETUP_CR_STOP,
@@ -99,24 +100,25 @@ package axi_iic_interface_defs is
         C_IIC_READ_STATE_TOGGLE_ISR,
         C_IIC_READ_STATE_FLUSH_TX_FIFO,
         C_IIC_READ_STATE_NORMAL_TX_FIFO,
-        C_IIC_READ_STATE_SET_RX_FIFO_PIRQ,
         C_IIC_READ_STATE_ENABLE_TX_FIFO_EMPTY_INTR,
         C_IIC_READ_STATE_WRITE_TX_FIFO_SLAVE_ADDR,
         C_IIC_READ_STATE_WRITE_TX_FIFO_DATA,
         C_IIC_READ_STATE_START_TX,
         C_IIC_READ_STATE_WAIT_FOR_TX_FIFO_EMPTY_INTR,
+        C_IIC_READ_STATE_SET_RX_FIFO_PIRQ,
         C_IIC_READ_STATE_ENABLE_RX_FIFO_FULL_INTR,
         C_IIC_READ_STATE_SETUP_REPEAT_START,
-        C_IIC_READ_STATE_START_RX,
+        C_IIC_READ_STATE_START_RX,                          -- START_RX: if NUM_RX = 1 then jump to SET_NAK
         C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR,
-        C_IIC_READ_STATE_SET_NAK,
-        C_IIC_READ_STATE_SET_RX_FIFO_PIRQ_FINAL,
         C_IIC_READ_STATE_READ_STATUS_REG,
         C_IIC_READ_STATE_READ_RX_FIFO,
         C_IIC_READ_STATE_STORE_RX_READ,
+        C_IIC_READ_STATE_CLEAR_RX_FIFO_FULL_INTR,
+        C_IIC_READ_STATE_SET_RX_FIFO_PIRQ_FINAL,
+        C_IIC_READ_STATE_SET_NAK,                           -- Jump to here for NUM_RX = 1
         C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR_FINAL,
         C_IIC_READ_STATE_READ_RX_FIFO_FINAL,
-        C_IIC_READ_STATE_STORE_RX_READ_FINAL,
+        C_IIC_READ_STATE_STORE_RX_READ_FINAL,               
         C_IIC_READ_STATE_ENABLE_NOT_BUSY_INTR,
         C_IIC_READ_STATE_WRITE_CR_STOP,
         C_IIC_READ_STATE_WAIT_FOR_NOT_BUSY_INTR,
@@ -139,7 +141,7 @@ package axi_iic_interface_defs is
     
     -- FIFO operation constants
     constant C_IIC_MIN_TX_WORDS : integer := 2;
-    constant C_IIC_DEFAULT_RX_WORDS : integer := 8;
+    constant C_IIC_MIN_RX_WORDS : integer := 1;
     
     -- IIC Register Offsets
     constant C_IIC_REG_GIE          : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#01C#, 9));

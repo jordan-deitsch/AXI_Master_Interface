@@ -106,7 +106,8 @@ architecture rtl of iic_interface is
     signal sda_t : std_logic; 
     signal iic_intr : std_logic;
     signal iic_read_reg : std_logic_vector (31 downto 0);
-    signal iic_slave_addr : std_logic_vector (7 downto 0);
+    signal iic_write_slave_addr : std_logic_vector (7 downto 0);
+    signal iic_read_slave_addr  : std_logic_vector (7 downto 0);
     
     -- IIC write control signals
     signal iic_write_state      : T_IIC_WRITE_STATE;
@@ -184,6 +185,8 @@ architecture rtl of iic_interface is
     signal vio_rx_fifo_rd_en        : std_logic;
     signal vio_rx_fifo_rd_en_pipe   : std_logic_vector (1 downto 0);
     
+    signal vio_iic_read_number      : std_logic_vector (3 downto 0);
+    
     -- TX FIFO signals (data being written to AXI-IIC for TX to slave device)
     signal tx_fifo_reset        : std_logic;
     signal tx_fifo_full         : std_logic;
@@ -257,17 +260,18 @@ begin
         X"04" when C_IIC_WRITE_STATE_FLUSH_TX_FIFO,
         X"05" when C_IIC_WRITE_STATE_NORMAL_TX_FIFO,
         X"06" when C_IIC_WRITE_STATE_ENABLE_TX_FIFO_EMPTY_INTR,
-        X"07" when C_IIC_WRITE_STATE_WRITE_TX_FIFO,
-        X"08" when C_IIC_WRITE_STATE_START_TX,
-        X"09" when C_IIC_WRITE_STATE_WAIT_FOR_TX_FIFO_EMPTY_INTR,
-        X"0A" when C_IIC_WRITE_STATE_SETUP_CR_STOP,
-        X"0B" when C_IIC_WRITE_STATE_WRITE_FINAL_TX_FIFO,
-        X"0C" when C_IIC_WRITE_STATE_CLEAR_TX_FIFO_EMPTY_INTR,
-        X"0D" when C_IIC_WRITE_STATE_ENABLE_NOT_BUSY_INTR,
-        X"0E" when C_IIC_WRITE_STATE_WAIT_FOR_NOT_BUSY_INTR,
-        X"0F" when C_IIC_WRITE_STATE_DISABLE_CONTROLLER,
-        X"10" when C_IIC_WRITE_STATE_DISABLE_ALL_INTR,
-        X"11" when C_IIC_WRITE_STATE_TRANSACTION_COMPLETE,
+        X"07" when C_IIC_WRITE_STATE_WRITE_TX_FIFO_SLAVE_ADDR,
+        X"08" when C_IIC_WRITE_STATE_WRITE_TX_FIFO_DATA,
+        X"09" when C_IIC_WRITE_STATE_START_TX,
+        X"0A" when C_IIC_WRITE_STATE_WAIT_FOR_TX_FIFO_EMPTY_INTR,
+        X"0B" when C_IIC_WRITE_STATE_SETUP_CR_STOP,
+        X"0C" when C_IIC_WRITE_STATE_WRITE_FINAL_TX_FIFO,
+        X"0D" when C_IIC_WRITE_STATE_CLEAR_TX_FIFO_EMPTY_INTR,
+        X"0E" when C_IIC_WRITE_STATE_ENABLE_NOT_BUSY_INTR,
+        X"0F" when C_IIC_WRITE_STATE_WAIT_FOR_NOT_BUSY_INTR,
+        X"10" when C_IIC_WRITE_STATE_DISABLE_CONTROLLER,
+        X"11" when C_IIC_WRITE_STATE_DISABLE_ALL_INTR,
+        X"12" when C_IIC_WRITE_STATE_TRANSACTION_COMPLETE,
         X"FF" when C_IIC_WRITE_STATE_ERROR;
         
     with iic_read_state select
@@ -279,30 +283,31 @@ begin
         X"04" when C_IIC_READ_STATE_TOGGLE_ISR,
         X"05" when C_IIC_READ_STATE_FLUSH_TX_FIFO,
         X"06" when C_IIC_READ_STATE_NORMAL_TX_FIFO,
-        X"07" when C_IIC_READ_STATE_SET_RX_FIFO_PIRQ,
-        X"08" when C_IIC_READ_STATE_ENABLE_TX_FIFO_EMPTY_INTR,
-        X"09" when C_IIC_READ_STATE_WRITE_TX_FIFO_SLAVE_ADDR,
-        X"0A" when C_IIC_READ_STATE_WRITE_TX_FIFO_DATA,
-        X"0B" when C_IIC_READ_STATE_START_TX,
-        X"0C" when C_IIC_READ_STATE_WAIT_FOR_TX_FIFO_EMPTY_INTR,
+        X"07" when C_IIC_READ_STATE_ENABLE_TX_FIFO_EMPTY_INTR,
+        X"08" when C_IIC_READ_STATE_WRITE_TX_FIFO_SLAVE_ADDR,
+        X"09" when C_IIC_READ_STATE_WRITE_TX_FIFO_DATA,
+        X"0A" when C_IIC_READ_STATE_START_TX,
+        X"0B" when C_IIC_READ_STATE_WAIT_FOR_TX_FIFO_EMPTY_INTR,
+        X"0C" when C_IIC_READ_STATE_SET_RX_FIFO_PIRQ,
         X"0D" when C_IIC_READ_STATE_ENABLE_RX_FIFO_FULL_INTR,
         X"0E" when C_IIC_READ_STATE_SETUP_REPEAT_START,
         X"0F" when C_IIC_READ_STATE_START_RX,
         X"10" when C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR,
-        X"11" when C_IIC_READ_STATE_SET_NAK,
-        X"12" when C_IIC_READ_STATE_SET_RX_FIFO_PIRQ_FINAL,
-        X"13" when C_IIC_READ_STATE_READ_STATUS_REG,
-        X"14" when C_IIC_READ_STATE_READ_RX_FIFO,
-        X"15" when C_IIC_READ_STATE_STORE_RX_READ,
-        X"16" when C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR_FINAL,
-        X"17" when C_IIC_READ_STATE_READ_RX_FIFO_FINAL,
-        X"18" when C_IIC_READ_STATE_STORE_RX_READ_FINAL,
-        X"19" when C_IIC_READ_STATE_ENABLE_NOT_BUSY_INTR,
-        X"1A" when C_IIC_READ_STATE_WRITE_CR_STOP,
-        X"1B" when C_IIC_READ_STATE_WAIT_FOR_NOT_BUSY_INTR,
-        X"1C" when C_IIC_READ_STATE_DISABLE_CONTROLLER,
-        X"1D" when C_IIC_READ_STATE_DISABLE_ALL_INTR,
-        X"1E" when C_IIC_READ_STATE_TRANSACTION_COMPLETE,
+        X"11" when C_IIC_READ_STATE_READ_STATUS_REG,
+        X"12" when C_IIC_READ_STATE_READ_RX_FIFO,
+        X"13" when C_IIC_READ_STATE_STORE_RX_READ,
+        X"14" when C_IIC_READ_STATE_CLEAR_RX_FIFO_FULL_INTR,
+        X"15" when C_IIC_READ_STATE_SET_RX_FIFO_PIRQ_FINAL,
+        X"16" when C_IIC_READ_STATE_SET_NAK,
+        X"17" when C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR_FINAL,
+        X"18" when C_IIC_READ_STATE_READ_RX_FIFO_FINAL,
+        X"19" when C_IIC_READ_STATE_STORE_RX_READ_FINAL,
+        X"1A" when C_IIC_READ_STATE_ENABLE_NOT_BUSY_INTR,
+        X"1B" when C_IIC_READ_STATE_WRITE_CR_STOP,
+        X"1C" when C_IIC_READ_STATE_WAIT_FOR_NOT_BUSY_INTR,
+        X"1D" when C_IIC_READ_STATE_DISABLE_CONTROLLER,
+        X"1E" when C_IIC_READ_STATE_DISABLE_ALL_INTR,
+        X"1F" when C_IIC_READ_STATE_TRANSACTION_COMPLETE,
         X"FF" when C_IIC_READ_STATE_ERROR;
     
     scl_iobuf : IOBUF
@@ -402,7 +407,8 @@ begin
             probe_out5(0)   => vio_tx_fifo_rd_en,
             probe_out6(0)   => vio_rx_fifo_rd_en,
             probe_out7(0)   => vio_iic_write_start,
-            probe_out8(0)   => vio_iic_read_start
+            probe_out8(0)   => vio_iic_read_start,
+            probe_out9      => vio_iic_read_number
         );
     
     axi_iic_inst : entity work.iic_0
@@ -846,8 +852,8 @@ begin
                 when C_IIC_WRITE_STATE_IDLE =>
                     -- Wait for external signal to start write sequence
                     if (iic_write_start = '1') then
-                        -- Check for at least 2 valid FIFO words available for transmit (IIC slave device address and 1 data word minimum)
-                        if (tx_fifo_valid = '0' or unsigned(tx_fifo_data_count) < C_IIC_MIN_TX_WORDS) then
+                        -- Check for min number of words for transmit (IIC slave device address and 1 data word minimum)
+                        if (unsigned(tx_fifo_data_count) < C_IIC_MIN_TX_WORDS) then
                             iic_write_state <= C_IIC_WRITE_STATE_ERROR;
                         else
                             iic_write_state <= C_IIC_WRITE_STATE_FLUSH_TX_FIFO;
@@ -893,23 +899,43 @@ begin
                     
                     -- Immediately transition to wait for AXI transaction to complete, prepare next state
                     iic_write_state <= C_IIC_WRITE_STATE_WAIT_FOR_AXI_WRITE;
-                    iic_write_state_next <= C_IIC_WRITE_STATE_WRITE_TX_FIFO;
+                    iic_write_state_next <= C_IIC_WRITE_STATE_WRITE_TX_FIFO_SLAVE_ADDR;
                 
-                when C_IIC_WRITE_STATE_WRITE_TX_FIFO =>
-                    -- If not final word, continue writing to TX_FIFO
+                when C_IIC_WRITE_STATE_WRITE_TX_FIFO_SLAVE_ADDR =>
+                    -- Write first word of TX buffer to TX_FIFO, this is the slave device address
+                    -- Set R/W bit to 0 for write
+                    if (tx_fifo_valid = '1') then
+                        iic_write_axi_write_start <= '1';
+                        iic_write_axi_write_addr  <= C_IIC_REG_TX_FIFO;
+                        iic_write_axi_write_data  <= (iic_write_axi_write_data'length - 1 downto tx_fifo_dout'length => '0') & 
+                                                    tx_fifo_dout(tx_fifo_dout'length - 1 downto 1) & '0';
+                        iic_write_tx_fifo_rd_en <= '1';
+                        
+                        -- Store slave address
+                        iic_write_slave_addr <= tx_fifo_dout(tx_fifo_dout'length - 1 downto 1) & '0';
+                        
+                        -- Prepare next state to write remainder of TX data
+                        iic_write_state <= C_IIC_WRITE_STATE_WAIT_FOR_AXI_WRITE;
+                        iic_write_state_next <= C_IIC_WRITE_STATE_WRITE_TX_FIFO_DATA;
+                        
+                    else 
+                        iic_write_state <= C_IIC_WRITE_STATE_ERROR;
+                    end if ;
+                
+                when C_IIC_WRITE_STATE_WRITE_TX_FIFO_DATA =>
+                    -- Write remaining TX buffer to TX_FIFO except for final word
                     if (tx_fifo_valid = '1' and unsigned(tx_fifo_data_count) > 1) then
                         iic_write_axi_write_start <= '1';
                         iic_write_axi_write_addr  <= C_IIC_REG_TX_FIFO;
-                        iic_write_axi_write_data  <= (iic_write_axi_write_data'length - 1 downto tx_fifo_dout'length => '0') & tx_fifo_dout;
+                        iic_write_axi_write_data  <= (iic_write_axi_write_data'length - 1 downto tx_fifo_dout'length => '0') & 
+                                                    tx_fifo_dout;
                         iic_write_tx_fifo_rd_en <= '1';
                         
                         iic_write_state <= C_IIC_WRITE_STATE_WAIT_FOR_AXI_WRITE;
-                        iic_write_state_next <= C_IIC_WRITE_STATE_WRITE_TX_FIFO;
+                        iic_write_state_next <= C_IIC_WRITE_STATE_WRITE_TX_FIFO_DATA;
                         
-                    elsif (tx_fifo_valid = '1' and unsigned(tx_fifo_data_count) = 1) then
+                    else
                         iic_write_state <= C_IIC_WRITE_STATE_START_TX;
-                    else 
-                        iic_write_state <= C_IIC_WRITE_STATE_ERROR;
                     end if ;
                 
                 when C_IIC_WRITE_STATE_START_TX =>
@@ -1065,8 +1091,9 @@ begin
                 when C_IIC_READ_STATE_IDLE =>
                     -- Wait for external signal to start read sequence
                     if (iic_read_start = '1') then
-                        -- Check for at least 2 valid FIFO words available for transmit (IIC slave device address and 1 data word minimum)
-                        if (tx_fifo_valid = '0' or unsigned(tx_fifo_data_count) < C_IIC_MIN_TX_WORDS) then
+                        -- Check for min number of words for transmit and receive
+                        if (unsigned(tx_fifo_data_count) < C_IIC_MIN_TX_WORDS or 
+                            unsigned(vio_iic_read_number) < C_IIC_MIN_RX_WORDS) then
                             iic_read_state <= C_IIC_READ_STATE_ERROR;
                         else
                             iic_read_state <= C_IIC_READ_STATE_FLUSH_TX_FIFO;
@@ -1111,15 +1138,6 @@ begin
                     
                     -- Immediately transition to wait for AXI transaction to complete, prepare next state
                     iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
-                    iic_read_state_next <= C_IIC_READ_STATE_SET_RX_FIFO_PIRQ;
-                    
-                when C_IIC_READ_STATE_SET_RX_FIFO_PIRQ =>
-                    iic_read_axi_write_start <= '1';
-                    iic_read_axi_write_addr  <= C_IIC_REG_RX_FIFO_PIRQ;
-                    iic_read_axi_write_data  <= std_logic_vector(to_unsigned(C_IIC_DEFAULT_RX_WORDS - 2, 32));
-                    
-                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                    iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
                     iic_read_state_next <= C_IIC_READ_STATE_ENABLE_TX_FIFO_EMPTY_INTR;
                     
                 when C_IIC_READ_STATE_ENABLE_TX_FIFO_EMPTY_INTR =>
@@ -1137,12 +1155,12 @@ begin
                     if (tx_fifo_valid = '1') then
                         iic_read_axi_write_start <= '1';
                         iic_read_axi_write_addr  <= C_IIC_REG_TX_FIFO;
-                        iic_read_axi_write_data  <= (iic_write_axi_write_data'length - 1 downto tx_fifo_dout'length => '0') & 
+                        iic_read_axi_write_data  <= (iic_read_axi_write_data'length - 1 downto tx_fifo_dout'length => '0') & 
                                                     tx_fifo_dout(tx_fifo_dout'length - 1 downto 1) & '0';
                         iic_read_tx_fifo_rd_en <= '1';
                         
                         -- Store slave address
-                        iic_slave_addr <= tx_fifo_dout;
+                        iic_read_slave_addr <= tx_fifo_dout(tx_fifo_dout'length - 1 downto 1) & '0';
                         
                         -- Prepare next state to write remainder of TX data
                         iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
@@ -1157,7 +1175,7 @@ begin
                     if (tx_fifo_valid = '1') then
                         iic_read_axi_write_start <= '1';
                         iic_read_axi_write_addr  <= C_IIC_REG_TX_FIFO;
-                        iic_read_axi_write_data  <= (iic_write_axi_write_data'length - 1 downto tx_fifo_dout'length => '0') & 
+                        iic_read_axi_write_data  <= (iic_read_axi_write_data'length - 1 downto tx_fifo_dout'length => '0') & 
                                                     tx_fifo_dout;
                         iic_read_tx_fifo_rd_en <= '1';
                         
@@ -1185,12 +1203,27 @@ begin
                         -- Check for expected interrupt on TX_FIFO_EMPTY
                         if (unsigned(iic_intr_status_reg and C_IIC_REG_ISR_IER_TX_FIFO_EMPTY_MASK) /= 0) then
                             iic_read_state <= C_IIC_READ_STATE_TOGGLE_ISR;
-                            iic_read_state_next <= C_IIC_READ_STATE_ENABLE_RX_FIFO_FULL_INTR;
+                            iic_read_state_next <= C_IIC_READ_STATE_SET_RX_FIFO_PIRQ;
                         else
                             iic_read_state <= C_IIC_READ_STATE_ERROR;
                         end if ;
                     end if ;
                 
+                when C_IIC_READ_STATE_SET_RX_FIFO_PIRQ =>
+                    
+                    iic_read_axi_write_start <= '1';
+                    iic_read_axi_write_addr  <= C_IIC_REG_RX_FIFO_PIRQ;
+                    iic_read_axi_write_data  <= std_logic_vector(resize(unsigned(vio_iic_read_number) - 2, iic_read_axi_write_data'length));
+                    
+                    -- If expected read number M = 1, set RX_FIFO_PIRQ = 0 to receive the only byte
+                    if (unsigned(vio_iic_read_number) = 1) then
+                        iic_read_axi_write_data  <= (others => '0');
+                    end if ; 
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_read_state_next <= C_IIC_READ_STATE_ENABLE_RX_FIFO_FULL_INTR;
+                    
                 when C_IIC_READ_STATE_ENABLE_RX_FIFO_FULL_INTR =>
                     iic_read_axi_write_start <= '1';
                     iic_read_axi_write_addr  <= C_IIC_REG_IER;
@@ -1208,6 +1241,14 @@ begin
                     iic_read_axi_write_data  <= C_IIC_REG_CR_RSTA_MASK or 
                                                 C_IIC_REG_CR_MSMS_MASK or 
                                                 C_IIC_REG_CR_IIC_ENABLE_MASK;
+                                                
+                    -- If expected read number M = 1, also set the NACK bit for first ACK/NACK cycle
+                    if (unsigned(vio_iic_read_number) = 1) then
+                        iic_read_axi_write_data  <= C_IIC_REG_CR_RSTA_MASK or 
+                                                    C_IIC_REG_CR_TXAK_MASK or 
+                                                    C_IIC_REG_CR_MSMS_MASK or 
+                                                    C_IIC_REG_CR_IIC_ENABLE_MASK;
+                    end if ;
                     
                     -- Immediately transition to wait for AXI transaction to complete, prepare next state
                     iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
@@ -1217,44 +1258,30 @@ begin
                     -- Write slave address to TX_FIFO with R/W = 1
                     iic_read_axi_write_start <= '1';
                     iic_read_axi_write_addr  <= C_IIC_REG_TX_FIFO;
-                    iic_read_axi_write_data  <= (iic_write_axi_write_data'length - 1 downto iic_slave_addr'length => '0') & 
-                                                    iic_slave_addr(iic_slave_addr'length - 1 downto 1) & '1';
+                    iic_read_axi_write_data  <= (iic_write_axi_write_data'length - 1 downto iic_read_slave_addr'length => '0') & 
+                                                    iic_read_slave_addr(iic_read_slave_addr'length - 1 downto 1) & '1';
                     
                     -- Immediately transition to wait for AXI transaction to complete, prepare next state
                     iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
                     iic_read_state_next <= C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR;
+                    
+                    -- If expected read number M = 1, jump to wait for interrupt for only byte
+                    if (unsigned(vio_iic_read_number) = 1) then
+                        iic_read_state_next <= C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR_FINAL;
+                    end if ;
                     
                 when C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR =>
                     -- Wait for interrupt to occur and interrupt status to be read
                     if (iic_intr_state = C_INTR_STATE_WAITING_CLEAR) then
                         -- Check for expected interrupt on RX_FIFO_FULL
                         if (unsigned(iic_intr_status_reg and C_IIC_REG_ISR_IER_RX_FIFO_FULL_MASK) /= 0) then
-                            iic_read_state <= C_IIC_READ_STATE_SET_NAK;
+                            iic_read_state <= C_IIC_READ_STATE_READ_STATUS_REG;
                         else
                             iic_read_state <= C_IIC_READ_STATE_ERROR;
                         end if ;
                     end if ;    
                 
-                when C_IIC_READ_STATE_SET_NAK =>
-                    iic_read_axi_write_start <= '1';
-                    iic_read_axi_write_addr  <= C_IIC_REG_CR;
-                    iic_read_axi_write_data  <= C_IIC_REG_CR_TXAK_MASK or 
-                                                C_IIC_REG_CR_MSMS_MASK or 
-                                                C_IIC_REG_CR_IIC_ENABLE_MASK;
-                    
-                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                    iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
-                    iic_read_state_next <= C_IIC_READ_STATE_SET_RX_FIFO_PIRQ_FINAL;
-                
-                when C_IIC_READ_STATE_SET_RX_FIFO_PIRQ_FINAL =>
-                    -- Set RX_FIFO_PIRQ to 0 so that next interrupt will trigger on first RX word
-                    iic_read_axi_write_start <= '1';
-                    iic_read_axi_write_addr  <= C_IIC_REG_RX_FIFO_PIRQ;
-                    iic_read_axi_write_data  <= (others => '0');
-                    
-                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
-                    iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
-                    iic_read_state_next <= C_IIC_READ_STATE_READ_STATUS_REG; 
+            -- READ RX_FIFO LOOP 
                 
                 when C_IIC_READ_STATE_READ_STATUS_REG =>
                     iic_read_axi_read_start <= '1';
@@ -1265,10 +1292,9 @@ begin
                     iic_read_state_next <= C_IIC_READ_STATE_READ_RX_FIFO;
                 
                 when C_IIC_READ_STATE_READ_RX_FIFO =>
-                    -- RX_FIFO is empty, toggle ISR to recieve final word
-                    if ((iic_read_reg and C_IIC_REG_SR_RX_FIFO_EMPTY_MASK) = C_IIC_REG_SR_RX_FIFO_EMPTY_MASK) then
-                        iic_read_state <= C_IIC_READ_STATE_TOGGLE_ISR;
-                        iic_read_state_next <= C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR_FINAL;
+                    -- If RX_FIFO is empty, toggle ISR to recieve final word
+                    if (unsigned(iic_read_reg and C_IIC_REG_SR_RX_FIFO_EMPTY_MASK) /= 0) then
+                        iic_read_state <= C_IIC_READ_STATE_CLEAR_RX_FIFO_FULL_INTR;
                    
                     -- If RX_FIFO not empty, proceed to read the next RX_FIFO word
                     else
@@ -1287,6 +1313,40 @@ begin
                     
                     -- Immediately transition to read status register again
                     iic_read_state <= C_IIC_READ_STATE_READ_STATUS_REG;
+                
+            -- READ_RX_FIFO_LOOP END
+                
+                when C_IIC_READ_STATE_CLEAR_RX_FIFO_FULL_INTR =>
+                    iic_read_axi_write_start <= '1';
+                    iic_read_axi_write_addr  <= C_IIC_REG_ISR;
+                    iic_read_axi_write_data  <= iic_intr_status_reg;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_read_state_next <= C_IIC_READ_STATE_SET_RX_FIFO_PIRQ_FINAL; 
+                
+                when C_IIC_READ_STATE_SET_RX_FIFO_PIRQ_FINAL =>
+                    -- Set RX_FIFO_PIRQ to 0 so that next interrupt will trigger on first RX word
+                    iic_read_axi_write_start <= '1';
+                    iic_read_axi_write_addr  <= C_IIC_REG_RX_FIFO_PIRQ;
+                    iic_read_axi_write_data  <= (others => '0');
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_read_state_next <= C_IIC_READ_STATE_SET_NAK; 
+                
+                when C_IIC_READ_STATE_SET_NAK =>
+                    iic_read_axi_write_start <= '1';
+                    iic_read_axi_write_addr  <= C_IIC_REG_CR;
+                    iic_read_axi_write_data  <= C_IIC_REG_CR_TXAK_MASK or 
+                                                C_IIC_REG_CR_MSMS_MASK or 
+                                                C_IIC_REG_CR_IIC_ENABLE_MASK;
+                    
+                    -- Immediately transition to wait for AXI transaction to complete, prepare next state
+                    iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
+                    iic_read_state_next <= C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR_FINAL;
+                
+            -- JUMP TO HERE FOR RX NUM WORDS M = 1
                 
                 when C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR_FINAL =>
                     -- Wait for interrupt to occur and interrupt status to be read
