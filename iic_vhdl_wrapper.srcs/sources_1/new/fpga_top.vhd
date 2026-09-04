@@ -68,10 +68,16 @@ architecture rtl of fpga_top is
     
     signal data_to_gpio         : std_logic_vector (3 downto 0);
     
-    signal vio_wr_addr  : std_logic_vector (7 downto 0);
-    signal vio_rd_addr  : std_logic_vector (7 downto 0);
-    signal vio_wr_data  : std_logic_vector (7 downto 0);
-    signal vio_is_write : std_logic;
+    signal vio_slave_addr   : std_logic_vector (6 downto 0);
+    signal vio_wr_addr      : std_logic_vector (7 downto 0);
+    signal vio_rd_addr      : std_logic_vector (7 downto 0);
+    signal vio_wr_data      : std_logic_vector (7 downto 0);
+    signal vio_is_write     : std_logic;
+    
+    signal iic_read_data        : std_logic_vector (15 downto 0);
+    signal iic_rd_data_valid    : std_logic;
+    signal iic_bus_ready        : std_logic;
+    signal iic_tx_complete      : std_logic;
     
     constant CLK_DIVIDE_RATIO   : integer := 50000000;  -- For 100MHz clk, divide rate = 50_000_000
     signal led_heartbeat_reg    : unsigned(31 downto 0) := (others => '0');
@@ -100,10 +106,25 @@ begin
     vio_top_inst : entity work.vio_1
         port map(
             clk             => clk,
-            probe_out0      => vio_wr_addr,
-            probe_out1      => vio_rd_addr,
-            probe_out2      => vio_wr_data,
-            probe_out3(0)   => vio_is_write
+            probe_out0      => vio_slave_addr,
+            probe_out1      => vio_wr_addr,
+            probe_out2      => vio_rd_addr,
+            probe_out3      => vio_wr_data,
+            probe_out4(0)   => vio_is_write
+        );
+        
+    ila_top_inst : entity work.ila_0
+        port map(
+            clk     => sys_clk_i,
+            probe0  => std_logic_vector'(0 => button_3_pulse),
+            probe1  => std_logic_vector'(0 => vio_is_write),
+            probe2  => std_logic_vector'(0 => iic_bus_ready),
+            probe3  => std_logic_vector'(0 => iic_tx_complete),
+            probe4  => vio_wr_addr,
+            probe5  => vio_wr_data,
+            probe6  => vio_rd_addr,
+            probe7  => iic_read_data,
+            probe8  => std_logic_vector'(0 => iic_rd_data_valid)
         );
     
     iic_interface_inst : entity work.iic_interface
@@ -113,12 +134,18 @@ begin
             scl_io          => iic_scl_io,
             sda_io          => iic_sda_io,
             
-            wr_addr_i   => vio_wr_addr,
-            wr_data_i   => vio_wr_data,
-            rd_addr_i   => vio_rd_addr,
+            bus_ready_o     => iic_bus_ready,
+            tx_completed_o  => iic_tx_complete,
             
-            is_write_i  => vio_is_write,
-            start_transaction_i =>  button_3_pulse,   
+            slave_addr_i    => vio_slave_addr,
+            wr_addr_i       => vio_wr_addr,
+            wr_data_i       => vio_wr_data,
+            rd_addr_i       => vio_rd_addr,
+            rd_data_o       => iic_read_data,
+            
+            is_write_i          => vio_is_write,
+            start_transaction_i => button_3_pulse,
+            rd_data_valid_o     => iic_rd_data_valid,
             
             axi_write_i => button_0_pulse,
             axi_read_i  => button_1_pulse

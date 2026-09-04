@@ -38,10 +38,11 @@ entity iic_interface is
         bus_ready_o     : out std_logic;    -- 1 if bus is believed to be ready to send more data
         tx_completed_o  : out std_logic;    -- 1 if transaction completed successfully
         
+        slave_addr_i    : in std_logic_vector (6 downto 0);
         wr_addr_i       : in std_logic_vector (7 downto 0);
         wr_data_i       : in std_logic_vector (7 downto 0);     -- Data to write to Bridge Chip (don't care for read operation)
         rd_addr_i       : in std_logic_vector (7 downto 0);
-        rd_data_o       : out std_logic_vector (7 downto 0);    -- Data Read from Bridge Chip (don't care for write operation)
+        rd_data_o       : out std_logic_vector (15 downto 0);    -- Data Read from Bridge Chip (don't care for write operation)
         
         is_write_i          : in std_logic; -- 1: write operation, 0: read operation
         start_transaction_i : in std_logic;
@@ -237,6 +238,12 @@ architecture rtl of iic_interface is
     signal rx_fifo_overflow     : std_logic;
     signal rx_fifo_underflow    : std_logic;
     signal rx_fifo_data_count   : std_logic_vector (8 downto 0);
+    
+    -- Output data word builder
+    constant C_NUM_RD_DATA_WORDS    : integer := 2;  -- Size of output read data word in bytes
+    constant C_NUM_BITS_PER_WORD    : integer := 8;  -- Size of output read data word in bytes
+    signal rx_data_word_count       : signed (7 downto 0);  -- counter for how many words have been read from RX FIFO buffer
+    signal rd_data_buf              : std_logic_vector ((C_NUM_BITS_PER_WORD * (C_NUM_RD_DATA_WORDS + 1)) - 1 downto 0);
          
     
 begin
@@ -435,7 +442,10 @@ begin
             probe55 => std_logic_vector'(0 => start_transaction_i),  
             probe56 => std_logic_vector'(0 => tx_fifo_wr_en),
             probe57 => buffer_state_ila,
-            probe58 => std_logic_vector'(0 => buffer_fifo_reset)
+            probe58 => std_logic_vector'(0 => buffer_fifo_reset),
+            
+            probe59 => std_logic_vector(rx_data_word_count),
+            probe60 => rd_data_buf
         );
         
     vio_iic_inst : entity work.vio_0
@@ -544,8 +554,12 @@ begin
     
     process (clk_i, reset_i) begin
         if (reset_i = '1') then
-            bus_ready_buf <= '0';
-            tx_completed_buf <= '0';
+            bus_ready_buf       <= '0';
+            tx_completed_buf    <= '0';
+            rd_data_valid_o     <= '0';
+            
+            rd_data_buf         <= (others => '0');
+            rd_data_o           <= (others => '0');
         
         elsif rising_edge(clk_i) then
             
@@ -556,10 +570,47 @@ begin
                 bus_ready_buf <= '0';
             end if ;
             
-            -- Pulse tx_completed if either write or read completes
-            tx_completed_buf <= '0';
+            -- Set tx_completed on transition into start of end of transaction
             if (iic_write_state = C_IIC_WRITE_STATE_TRANSACTION_COMPLETE or iic_read_state = C_IIC_READ_STATE_TRANSACTION_COMPLETE) then
                 tx_completed_buf <= '1';
+            elsif (iic_write_state = C_IIC_WRITE_STATE_START_TRANSACTION or iic_read_state = C_IIC_READ_STATE_START_TRANSACTION) then
+                tx_completed_buf <= '0';
+            end if ;
+            
+            -- Set the rd_data_o and rd_data_valid_o after read transactions:
+            -- Reset rd_data_valid and rd_data on start of new read transaction
+            if (iic_read_state = C_IIC_READ_STATE_START_TRANSACTION) then
+                rd_data_buf         <= (others => '0');
+                rx_data_word_count  <= to_signed(-1, rx_data_word_count'length);
+                rd_data_valid_o     <= '0';
+                rx_fifo_rd_en       <= '0';
+            
+            -- When read transaction is complete, initiate formatting of new rd_data_o 
+            elsif (iic_read_state = C_IIC_READ_STATE_TRANSACTION_COMPLETE) then
+                rx_data_word_count  <= to_signed(0, rx_data_word_count'length);
+                rx_fifo_rd_en       <= '1';
+                
+            -- Continue reading RX_FIFO buffer and shiffting data into rd_data_o
+            elsif ((rx_data_word_count < C_NUM_RD_DATA_WORDS) and (rx_data_word_count /= -1)) then
+                
+                if(rx_fifo_valid = '1') then
+                    rd_data_buf         <= rd_data_buf(rd_data_buf'length - rx_fifo_dout'length - 1 downto 0) & rx_fifo_dout;
+                    rx_data_word_count  <= rx_data_word_count + 1;
+                    rx_fifo_rd_en       <= '1';
+                else
+                    rx_data_word_count  <= to_signed(-1, rx_data_word_count'length);
+                    rx_fifo_rd_en       <= '0';
+                end if ;
+                
+            -- Final RX words shifted into rd_data_buffer
+            elsif (rx_data_word_count = C_NUM_RD_DATA_WORDS) then
+                rd_data_o       <= rd_data_buf(rd_data_o'length - 1 downto 0);
+                rd_data_valid_o <= '1';
+                rx_fifo_rd_en   <= '0';
+            
+            else
+                rd_data_valid_o <= '0';
+                rx_fifo_rd_en   <= '0';
             end if ;
             
         end if ;
@@ -723,7 +774,7 @@ begin
             
             when C_BUFFER_STATE_LOAD_SLAVE_ADDR =>
                 buffer_wr_en <= '1';
-                buffer_din <= C_IIC_SLAVE_7_BIT_ADDR_SX1509 & '0';
+                buffer_din <= slave_addr_i & '0';
                 buffer_state <= C_BUFFER_STATE_WAIT_FOR_WR_AK;
                 buffer_state_next <= C_BUFFER_STATE_LOAD_REGISTER_ADDR;
                 
