@@ -353,7 +353,8 @@ begin
         X"1E" when C_IIC_READ_STATE_WAIT_FOR_NOT_BUSY_INTR,
         X"1F" when C_IIC_READ_STATE_DISABLE_CONTROLLER,
         X"20" when C_IIC_READ_STATE_DISABLE_ALL_INTR,
-        X"21" when C_IIC_READ_STATE_TRANSACTION_COMPLETE,
+        X"21" when C_IIC_READ_STATE_FORMAT_READ_DATA,
+        X"22" when C_IIC_READ_STATE_TRANSACTION_COMPLETE,
         X"FF" when C_IIC_READ_STATE_ERROR;
     
     scl_iobuf : IOBUF
@@ -552,13 +553,12 @@ begin
     tx_fifo_reset <= iic_reset_fifo_reset or buffer_fifo_reset;
     rx_fifo_reset <= iic_reset_fifo_reset or buffer_fifo_reset;
     
+    -- Assign output signals for IIC bus status
     process (clk_i, reset_i) begin
         if (reset_i = '1') then
             bus_ready_buf       <= '0';
             tx_completed_buf    <= '0';
             rd_data_valid_o     <= '0';
-            
-            rd_data_buf         <= (others => '0');
             rd_data_o           <= (others => '0');
         
         elsif rising_edge(clk_i) then
@@ -571,46 +571,18 @@ begin
             end if ;
             
             -- Set tx_completed on transition into start of end of transaction
-            if (iic_write_state = C_IIC_WRITE_STATE_TRANSACTION_COMPLETE or iic_read_state = C_IIC_READ_STATE_TRANSACTION_COMPLETE) then
-                tx_completed_buf <= '1';
-            elsif (iic_write_state = C_IIC_WRITE_STATE_START_TRANSACTION or iic_read_state = C_IIC_READ_STATE_START_TRANSACTION) then
+            if (iic_write_state = C_IIC_WRITE_STATE_START_TRANSACTION or iic_read_state = C_IIC_READ_STATE_START_TRANSACTION) then
                 tx_completed_buf <= '0';
+            elsif (iic_write_state = C_IIC_WRITE_STATE_TRANSACTION_COMPLETE or iic_read_state = C_IIC_READ_STATE_TRANSACTION_COMPLETE) then
+                tx_completed_buf <= '1';
             end if ;
             
-            -- Set the rd_data_o and rd_data_valid_o after read transactions:
-            -- Reset rd_data_valid and rd_data on start of new read transaction
+            -- Set rd_data_o and rd_data_valid_o at start and end of read transaction only
             if (iic_read_state = C_IIC_READ_STATE_START_TRANSACTION) then
-                rd_data_buf         <= (others => '0');
-                rx_data_word_count  <= to_signed(-1, rx_data_word_count'length);
-                rd_data_valid_o     <= '0';
-                rx_fifo_rd_en       <= '0';
-            
-            -- When read transaction is complete, initiate formatting of new rd_data_o 
+                rd_data_valid_o <= '0';
             elsif (iic_read_state = C_IIC_READ_STATE_TRANSACTION_COMPLETE) then
-                rx_data_word_count  <= to_signed(0, rx_data_word_count'length);
-                rx_fifo_rd_en       <= '1';
-                
-            -- Continue reading RX_FIFO buffer and shiffting data into rd_data_o
-            elsif ((rx_data_word_count < C_NUM_RD_DATA_WORDS) and (rx_data_word_count /= -1)) then
-                
-                if(rx_fifo_valid = '1') then
-                    rd_data_buf         <= rd_data_buf(rd_data_buf'length - rx_fifo_dout'length - 1 downto 0) & rx_fifo_dout;
-                    rx_data_word_count  <= rx_data_word_count + 1;
-                    rx_fifo_rd_en       <= '1';
-                else
-                    rx_data_word_count  <= to_signed(-1, rx_data_word_count'length);
-                    rx_fifo_rd_en       <= '0';
-                end if ;
-                
-            -- Final RX words shifted into rd_data_buffer
-            elsif (rx_data_word_count = C_NUM_RD_DATA_WORDS) then
                 rd_data_o       <= rd_data_buf(rd_data_o'length - 1 downto 0);
                 rd_data_valid_o <= '1';
-                rx_fifo_rd_en   <= '0';
-            
-            else
-                rd_data_valid_o <= '0';
-                rx_fifo_rd_en   <= '0';
             end if ;
             
         end if ;
@@ -900,15 +872,19 @@ begin
     end process ;
     
     -- Process to read interrupt status register on rising edge of interrupt
-    process (clk_i, reset_i) begin
-        if (reset_i = '1') then
+    process (clk_i, reset_i) is
+        procedure iic_intr_reset is
+        begin
             iic_intr_buff <= '0';
             iic_intr_error_flag <= '0';
             iic_intr_status_reg <= (others => '0');
-                        
             iic_intr_axi_read_start <= '0';
             iic_intr_axi_read_addr <= (others => '0');
-            
+        end procedure ;
+        
+        begin
+        if (reset_i = '1') then
+            iic_intr_reset;
             iic_intr_state <= C_INTR_STATE_RESET;
             iic_intr_state_next <= C_INTR_STATE_RESET;
             
@@ -926,12 +902,7 @@ begin
             
                 case iic_intr_state is
                 when C_INTR_STATE_RESET =>
-                    iic_intr_buff <= '0';
-                    iic_intr_error_flag <= '0';
-                    iic_intr_status_reg <= (others => '0');
-                    iic_intr_axi_read_addr <= (others => '0');
-                    
-                    -- Immediately transition to C_INTR_STATE_IDLE
+                    iic_intr_reset;
                     iic_intr_state <= C_INTR_STATE_IDLE;
                     
                 when C_INTR_STATE_IDLE =>
@@ -979,8 +950,9 @@ begin
     end process ;
     
     -- Process to perform IIC write transaction
-    process (clk_i, reset_i) begin
-        if (reset_i = '1') then
+    process (clk_i, reset_i) is
+        procedure iic_write_reset is
+        begin
             iic_write_axi_write_addr  <= (others => '0');
             iic_write_axi_write_data  <= (others => '0');
             
@@ -988,7 +960,11 @@ begin
             iic_write_tx_fifo_rd_en     <= '0';
             iic_write_load_buffer       <= '0';
             iic_write_error_flag        <= '0';
-            
+        end procedure ;
+        
+        begin
+        if (reset_i = '1') then
+            iic_write_reset;            
             iic_write_state <= C_IIC_WRITE_STATE_RESET;
             iic_write_state_next <= C_IIC_WRITE_STATE_RESET;
             
@@ -1007,10 +983,9 @@ begin
             
                 case iic_write_state is
                 when C_IIC_WRITE_STATE_RESET =>
-                    iic_write_axi_write_addr  <= (others => '0');
-                    iic_write_axi_write_data  <= (others => '0');
-                    iic_write_error_flag <= '0';
+                    iic_write_reset;
                     iic_write_state <= C_IIC_WRITE_STATE_IDLE;
+                    iic_write_state_next <= C_IIC_WRITE_STATE_IDLE;
                     
                 when C_IIC_WRITE_STATE_IDLE =>
                     -- Wait for external signal to start write sequence
@@ -1231,9 +1206,9 @@ begin
     end process ;
     
     -- Process to perform IIC read transaction
-    process (clk_i, reset_i) begin
-        if (reset_i = '1') then
-            
+    process (clk_i, reset_i) is
+        procedure iic_read_reset is
+        begin
             iic_read_axi_write_addr  <= (others => '0');
             iic_read_axi_write_data  <= (others => '0');
             iic_read_axi_read_addr   <= (others => '0');
@@ -1245,6 +1220,14 @@ begin
             rx_fifo_wr_en               <= '0';
             iic_read_error_flag         <= '0';
             
+            rd_data_buf         <= (others => '0');
+            rx_data_word_count  <= to_signed(-1, rx_data_word_count'length);
+            rx_fifo_rd_en       <= '0';
+        end procedure ;
+        
+    begin
+        if (reset_i = '1') then
+            iic_read_reset;
             iic_read_state <= C_IIC_READ_STATE_RESET;
             iic_read_state_next <= C_IIC_READ_STATE_RESET;
             
@@ -1265,10 +1248,9 @@ begin
             
                 case iic_read_state is
                 when C_IIC_READ_STATE_RESET =>
-                    iic_read_axi_write_addr  <= (others => '0');
-                    iic_read_axi_write_data  <= (others => '0');
-                    iic_read_error_flag <= '0';
+                    iic_read_reset;
                     iic_read_state <= C_IIC_READ_STATE_IDLE;
+                    iic_read_state_next <= C_IIC_READ_STATE_IDLE;
                     
                 when C_IIC_READ_STATE_IDLE =>
                     -- Wait for external signal to start read sequence
@@ -1311,8 +1293,12 @@ begin
                     end if ;
                     
                 when C_IIC_READ_STATE_START_TRANSACTION =>
+                    -- Initialize output read data at start of transaction
+                    rd_data_buf         <= (others => '0');
+                    rx_data_word_count  <= to_signed(-1, rx_data_word_count'length);
+                    
                     -- Check for min number of words for transmit and receive
-                    if ( unsigned(tx_fifo_data_count) < C_IIC_MIN_TX_WORDS or 
+                    if (unsigned(tx_fifo_data_count) < C_IIC_MIN_TX_WORDS or 
                         unsigned(vio_iic_read_number) < C_IIC_MIN_RX_WORDS) then
                         iic_read_state <= C_IIC_READ_STATE_ERROR;
                     
@@ -1621,7 +1607,32 @@ begin
                     
                     -- Immediately transition to wait for AXI transaction to complete, prepare next state
                     iic_read_state <= C_IIC_READ_STATE_WAIT_FOR_AXI_WRITE;
-                    iic_read_state_next <= C_IIC_READ_STATE_TRANSACTION_COMPLETE;
+                    iic_read_state_next <= C_IIC_READ_STATE_FORMAT_READ_DATA;
+                
+                when C_IIC_READ_STATE_FORMAT_READ_DATA =>
+                    
+                    -- Initiate reading from RX_FIFO buffer for rd_data_buf
+                    if (rx_data_word_count = to_signed(-1, rx_data_word_count'length)) then
+                        rx_data_word_count <= to_signed(0, rx_data_word_count'length);
+                        rx_fifo_rd_en   <= '1';
+                    
+                    -- Continue reading RX_FIFO buffer and shiffting data into rd_data_buf
+                    elsif ((rx_data_word_count < C_NUM_RD_DATA_WORDS) and (rx_data_word_count /= to_signed(-1, rx_data_word_count'length))) then
+                        if(rx_fifo_valid = '1') then
+                            rd_data_buf         <= rd_data_buf(rd_data_buf'length - rx_fifo_dout'length - 1 downto 0) & rx_fifo_dout;
+                            rx_data_word_count  <= rx_data_word_count + 1;
+                        else
+                            iic_read_state <= C_IIC_READ_STATE_ERROR;
+                        end if ;
+                        
+                    -- Final RX words shifted into rd_data_buffer
+                    elsif (rx_data_word_count = C_NUM_RD_DATA_WORDS) then
+                        rx_fifo_rd_en   <= '0';
+                        iic_read_state  <= C_IIC_READ_STATE_TRANSACTION_COMPLETE;
+                    
+                    else
+                        iic_read_state <= C_IIC_READ_STATE_ERROR;
+                    end if ;
                 
                 when C_IIC_READ_STATE_TRANSACTION_COMPLETE =>
                     -- Wait for interrupt to clear and interrupt controller to return to idle
