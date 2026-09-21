@@ -25,7 +25,7 @@ use ieee.numeric_std.all;
 
 package axi_iic_interface_defs is
     
-        type T_AXI_WRITE_STATE is 
+    type T_AXI_WRITE_STATE is 
     (
         C_AXI_WRITE_STATE_RESET,
         C_AXI_WRITE_STATE_IDLE,
@@ -144,10 +144,9 @@ package axi_iic_interface_defs is
         C_IIC_READ_STATE_TRANSACTION_COMPLETE,
         C_IIC_READ_STATE_ERROR
     );
-   
-    -- FIFO operation constants
-    constant C_IIC_MIN_TX_WORDS : integer := 2;
-    constant C_IIC_MIN_RX_WORDS : integer := 1;
+    
+    constant C_STATE_RISING     : std_logic_vector (1 downto 0) := "01";
+    constant C_STATE_FALLING    : std_logic_vector (1 downto 0) := "10";
     
     -- IIC Register Offsets
     constant C_IIC_REG_GIE          : std_logic_vector(8 downto 0) := std_logic_vector(to_unsigned(16#01C#, 9));
@@ -198,6 +197,5 @@ package axi_iic_interface_defs is
     constant C_IIC_REG_SR_TX_FIFO_EMPTY_MASK    : std_logic_vector(31 downto 0) := X"0000_0080";
     
     constant C_IIC_REG_SOFTR_RESET_VALUE        : std_logic_vector(31 downto 0) := X"0000_000A";
-    constant C_IIC_SLAVE_7_BIT_ADDR_SX1509      : std_logic_vector(6 downto 0) := std_logic_vector(to_unsigned(16#3E#, 7));   -- 7-bit address of SX1509
 
 end axi_iic_interface_defs;

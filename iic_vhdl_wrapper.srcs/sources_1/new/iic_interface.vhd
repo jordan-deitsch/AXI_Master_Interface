@@ -28,6 +28,10 @@ use UNISIM.VComponents.all;
 use work.axi_iic_interface_defs.all;
 
 entity iic_interface is
+    generic (
+        NUM_TX_BYTES : integer := 2;    -- Default number of TX bytes (including device address)
+        NUM_RX_BYTES : integer := 2     -- Default number of RX bytes
+    );
     port ( 
         clk_i    : in std_logic;
         reset_i  : in std_logic;
@@ -122,8 +126,8 @@ architecture rtl of iic_interface is
     signal sda_o : std_logic; 
     signal sda_t : std_logic;
      
-    signal iic_intr     : std_logic;
-    signal iic_read_reg : std_logic_vector (31 downto 0);
+    signal iic_intr             : std_logic;
+    signal iic_read_reg         : std_logic_vector (31 downto 0);
     signal iic_write_slave_addr : std_logic_vector (7 downto 0);
     signal iic_read_slave_addr  : std_logic_vector (7 downto 0);
     
@@ -177,7 +181,7 @@ architecture rtl of iic_interface is
     signal iic_intr_state       : T_INTR_STATE;
     signal iic_intr_state_next  : T_INTR_STATE;
     signal iic_intr_state_ila   : std_logic_vector (7 downto 0);
-    signal iic_intr_buff        : std_logic;
+    signal iic_intr_pipe        : std_logic_vector (1 downto 0);
     signal iic_intr_error_flag  : std_logic;
     signal iic_intr_status_reg  : std_logic_vector (31 downto 0);
     
@@ -240,10 +244,9 @@ architecture rtl of iic_interface is
     signal rx_fifo_data_count   : std_logic_vector (8 downto 0);
     
     -- Output data word builder
-    constant C_NUM_RD_DATA_WORDS    : integer := 2;  -- Size of output read data word in bytes
-    constant C_NUM_BITS_PER_WORD    : integer := 8;  -- Size of output read data word in bytes
+    constant C_NUM_BITS_PER_BYTE    : integer := 8;  -- Size of output read data word in bytes
     signal rx_data_word_count       : signed (7 downto 0);  -- counter for how many words have been read from RX FIFO buffer
-    signal rd_data_buf              : std_logic_vector ((C_NUM_BITS_PER_WORD * (C_NUM_RD_DATA_WORDS + 1)) - 1 downto 0);
+    signal rd_data_buf              : std_logic_vector ((C_NUM_BITS_PER_BYTE * (NUM_RX_BYTES + 1)) - 1 downto 0);
          
     
 begin
@@ -570,23 +573,23 @@ begin
                 bus_ready_buf <= '0';
             end if ;
             
-            -- Set tx_completed on transition into start of end of transaction
-            if (iic_write_state = C_IIC_WRITE_STATE_START_TRANSACTION or iic_read_state = C_IIC_READ_STATE_START_TRANSACTION) then
-                tx_completed_buf <= '0';
-            elsif (iic_write_state = C_IIC_WRITE_STATE_TRANSACTION_COMPLETE or iic_read_state = C_IIC_READ_STATE_TRANSACTION_COMPLETE) then
-                tx_completed_buf <= '1';
-            end if ;
+            -- Set tx_completed_o and rd_data_valid_o to '0' when new transaction starts
+            if (iic_write_state = C_IIC_WRITE_STATE_IDLE and iic_read_state = C_IIC_READ_STATE_IDLE and start_transaction_i = '1') then
+                tx_completed_buf    <= '0';
+                rd_data_valid_o     <= '0';
             
-            -- Set rd_data_o and rd_data_valid_o at start and end of read transaction only
-            if (iic_read_state = C_IIC_READ_STATE_START_TRANSACTION) then
-                rd_data_valid_o <= '0';
+            -- Set tx_completed_o on transition into end of transaction
+            elsif (iic_write_state = C_IIC_WRITE_STATE_TRANSACTION_COMPLETE) then
+                tx_completed_buf    <= '1';
+            
+            -- Set rd_data_o and rd_data_valid_o at end of read transaction only
             elsif (iic_read_state = C_IIC_READ_STATE_TRANSACTION_COMPLETE) then
-                rd_data_o       <= rd_data_buf(rd_data_o'length - 1 downto 0);
-                rd_data_valid_o <= '1';
+                tx_completed_buf    <= '1';
+                rd_data_valid_o     <= '1';
+                rd_data_o           <= rd_data_buf(rd_data_o'length - 1 downto 0);
             end if ;
             
         end if ;
-        
     end process ;
     
     -- MUX to select driver process of AXI read and write access
@@ -875,7 +878,7 @@ begin
     process (clk_i, reset_i) is
         procedure iic_intr_reset is
         begin
-            iic_intr_buff <= '0';
+            iic_intr_pipe <= (others => '0');
             iic_intr_error_flag <= '0';
             iic_intr_status_reg <= (others => '0');
             iic_intr_axi_read_start <= '0';
@@ -890,8 +893,11 @@ begin
             
         elsif rising_edge(clk_i) then
             
+            -- Buffer interrupt to detect rising and falling edges
+            iic_intr_pipe(0) <= iic_intr;
+            iic_intr_pipe(1) <= iic_intr_pipe(0);
+            
             -- Initialize signals that can be pulsed in a state
-            iic_intr_buff <= iic_intr;
             iic_intr_axi_read_start <= '0';
             
             -- Hold in reset until reset sequence is complete
@@ -907,7 +913,7 @@ begin
                     
                 when C_INTR_STATE_IDLE =>
                     -- Wait for interrupt rising edge to transition to start interrupt sequence
-                    if (iic_intr_buff = '0' and iic_intr = '1') then
+                    if (iic_intr_pipe = C_STATE_RISING) then
                         iic_intr_state <= C_INTR_STATE_READ_ISR;
                     end if ;
                     
@@ -999,7 +1005,6 @@ begin
                         end if ;
                     end if ;
                     
-                    
                 when C_IIC_WRITE_STATE_WAIT_FOR_AXI_WRITE =>
                     -- Wait for write to finish, then transition to next state
                     if (axi_write_done = '1') then
@@ -1020,8 +1025,8 @@ begin
                     end if ;
                 
                 when C_IIC_WRITE_STATE_START_TRANSACTION =>
-                    -- Check for min number of words for transmit and receive
-                    if (unsigned(tx_fifo_data_count) < C_IIC_MIN_TX_WORDS) then 
+                    -- Check for expected number of words for transmit
+                    if (unsigned(tx_fifo_data_count) < NUM_TX_BYTES) then 
                         iic_write_state <= C_IIC_WRITE_STATE_ERROR;
                     
                     else
@@ -1298,8 +1303,7 @@ begin
                     rx_data_word_count  <= to_signed(-1, rx_data_word_count'length);
                     
                     -- Check for min number of words for transmit and receive
-                    if (unsigned(tx_fifo_data_count) < C_IIC_MIN_TX_WORDS or 
-                        unsigned(vio_iic_read_number) < C_IIC_MIN_RX_WORDS) then
+                    if (unsigned(tx_fifo_data_count) < NUM_TX_BYTES) then
                         iic_read_state <= C_IIC_READ_STATE_ERROR;
                     
                     else
@@ -1397,10 +1401,10 @@ begin
                     
                     iic_read_axi_write_start <= '1';
                     iic_read_axi_write_addr  <= C_IIC_REG_RX_FIFO_PIRQ;
-                    iic_read_axi_write_data  <= std_logic_vector(resize(unsigned(vio_iic_read_number) - 2, iic_read_axi_write_data'length));
+                    iic_read_axi_write_data  <= std_logic_vector(to_unsigned(NUM_RX_BYTES - 2, iic_read_axi_write_data'length));
                     
                     -- If expected read number M = 1, set RX_FIFO_PIRQ = 0 to receive the only byte
-                    if (unsigned(vio_iic_read_number) = 1) then
+                    if (NUM_RX_BYTES = 1) then
                         iic_read_axi_write_data  <= (others => '0');
                     end if ; 
                     
@@ -1427,7 +1431,7 @@ begin
                                                 C_IIC_REG_CR_IIC_ENABLE_MASK;
                                                 
                     -- If expected read number M = 1, also set the NACK bit for first ACK/NACK cycle
-                    if (unsigned(vio_iic_read_number) = 1) then
+                    if (NUM_RX_BYTES = 1) then
                         iic_read_axi_write_data  <= C_IIC_REG_CR_RSTA_MASK or 
                                                     C_IIC_REG_CR_TXAK_MASK or 
                                                     C_IIC_REG_CR_MSMS_MASK or 
@@ -1450,7 +1454,7 @@ begin
                     iic_read_state_next <= C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR;
                     
                     -- If expected read number M = 1, jump to wait for interrupt for only byte
-                    if (unsigned(vio_iic_read_number) = 1) then
+                    if (NUM_RX_BYTES = 1) then
                         iic_read_state_next <= C_IIC_READ_STATE_WAIT_FOR_RX_FIFO_FULL_INTR_FINAL;
                     end if ;
                     
@@ -1616,8 +1620,8 @@ begin
                         rx_data_word_count <= to_signed(0, rx_data_word_count'length);
                         rx_fifo_rd_en   <= '1';
                     
-                    -- Continue reading RX_FIFO buffer and shiffting data into rd_data_buf
-                    elsif ((rx_data_word_count < C_NUM_RD_DATA_WORDS) and (rx_data_word_count /= to_signed(-1, rx_data_word_count'length))) then
+                    -- Continue reading RX_FIFO buffer and shifting data into rd_data_buf
+                    elsif ((rx_data_word_count < NUM_RX_BYTES) and (rx_data_word_count /= to_signed(-1, rx_data_word_count'length))) then
                         if(rx_fifo_valid = '1') then
                             rd_data_buf         <= rd_data_buf(rd_data_buf'length - rx_fifo_dout'length - 1 downto 0) & rx_fifo_dout;
                             rx_data_word_count  <= rx_data_word_count + 1;
@@ -1626,7 +1630,7 @@ begin
                         end if ;
                         
                     -- Final RX words shifted into rd_data_buffer
-                    elsif (rx_data_word_count = C_NUM_RD_DATA_WORDS) then
+                    elsif (rx_data_word_count = NUM_RX_BYTES) then
                         rx_fifo_rd_en   <= '0';
                         iic_read_state  <= C_IIC_READ_STATE_TRANSACTION_COMPLETE;
                     
